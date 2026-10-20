@@ -9,7 +9,7 @@ pub struct Db(pub Mutex<Connection>);
 
 /// Ordered schema migrations. Index + 1 is the resulting `user_version`.
 /// Never edit a released migration; append a new one instead.
-const MIGRATIONS: &[&str] = &[
+pub(crate) const MIGRATIONS: &[&str] = &[
     // v1: initial schema
     r#"
     CREATE TABLE profile (
@@ -133,6 +133,33 @@ const MIGRATIONS: &[&str] = &[
         text        TEXT NOT NULL,
         created_at  TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    "#,
+    // v4: one-off milestones become tiers of achievement families
+    r#"
+    UPDATE achievement SET id = CASE id
+        WHEN 'first_objective' THEN 'objectives:1'
+        WHEN 'objectives_10'   THEN 'objectives:10'
+        WHEN 'objectives_50'   THEN 'objectives:50'
+        WHEN 'objectives_100'  THEN 'objectives:100'
+        WHEN 'first_operation' THEN 'operations:1'
+        WHEN 'operations_10'   THEN 'operations:10'
+        WHEN 'strategic_5'     THEN 'strategic:5'
+        WHEN 'on_time_10'      THEN 'on_time:10'
+        WHEN 'streak_3'        THEN 'streak:3'
+        WHEN 'streak_7'        THEN 'streak:7'
+        WHEN 'streak_30'       THEN 'streak:30'
+        WHEN 'level_5'         THEN 'level:5'
+        WHEN 'level_10'        THEN 'level:10'
+        ELSE id END;
+    "#,
+    // v5: focus time banked when finished timer runs are cleared
+    r#"
+    ALTER TABLE profile ADD COLUMN archived_focus_ms INTEGER NOT NULL DEFAULT 0;
+    "#,
+    // v6: colour theme
+    r#"
+    ALTER TABLE profile ADD COLUMN theme TEXT NOT NULL DEFAULT 'dark'
+        CHECK (theme IN ('dark', 'light', 'system'));
     "#,
 ];
 

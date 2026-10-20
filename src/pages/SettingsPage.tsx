@@ -1,12 +1,19 @@
 import { useEffect, useState } from "react";
-import { api, errorMessage, type Settings } from "../api";
-import { useT, type Lang } from "../i18n";
+import { api, errorMessage, type Settings, type Theme } from "../api";
+import DataPanel from "../components/DataPanel";
+import { useT, type Lang, type TKey } from "../i18n";
 
 type Status = { kind: "ok" | "warn" | "err" | "idle"; text: string };
 
 const LANGUAGES: { value: Lang; label: string }[] = [
   { value: "en", label: "English" },
   { value: "zh", label: "简体中文" },
+];
+
+const THEMES: { value: Theme; label: TKey }[] = [
+  { value: "dark", label: "set.themeDark" },
+  { value: "light", label: "set.themeLight" },
+  { value: "system", label: "set.themeSystem" },
 ];
 
 export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => void }) {
@@ -38,6 +45,16 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
     try {
       const saved = await api.setLanguage(language);
       setSettings((s) => (s ? { ...s, language: saved.language } : saved));
+      onSaved(saved);
+    } catch (e) {
+      setSaveStatus({ kind: "err", text: errorMessage(e) });
+    }
+  }
+
+  async function changeTheme(theme: Theme) {
+    try {
+      const saved = await api.setTheme(theme);
+      setSettings((s) => (s ? { ...s, theme: saved.theme } : saved));
       onSaved(saved);
     } catch (e) {
       setSaveStatus({ kind: "err", text: errorMessage(e) });
@@ -214,6 +231,23 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
           <span className="field-hint">{t("set.languageHint")}</span>
 
           <div className="field">
+            <span className="label">{t("set.theme")}</span>
+            <div className="segmented" role="radiogroup" aria-label={t("set.theme")}>
+              {THEMES.map((th) => (
+                <button
+                  key={th.value}
+                  role="radio"
+                  aria-checked={settings.theme === th.value}
+                  className={settings.theme === th.value ? "on" : ""}
+                  onClick={() => changeTheme(th.value)}
+                >
+                  {t(th.label)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="field">
             <label className="label" htmlFor="goals">{t("set.goals")}</label>
             <textarea
               id="goals"
@@ -297,6 +331,8 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
           {t("set.saveAll")}
         </button>
       </div>
+
+      <DataPanel />
     </div>
   );
 }

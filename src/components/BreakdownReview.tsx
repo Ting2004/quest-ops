@@ -70,7 +70,7 @@ export default function BreakdownReview({ quest, initial, onDeployed, onCancel, 
         <h2 className="h-display" style={{ fontSize: 24 }}>
           {t("br.title")}
           {position && (
-            <span style={{ color: "var(--accent)" }}>
+            <span style={{ color: "var(--accent-text)" }}>
               {" "}
               {position.index + 1}/{position.total}
             </span>

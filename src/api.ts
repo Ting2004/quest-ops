@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Lang } from "./i18n";
 
+export type Theme = "dark" | "light" | "system";
+
 export interface Settings {
   commanderName: string;
   goalsText: string;
@@ -13,6 +15,7 @@ export interface Settings {
   urgentWithinDays: number;
   importanceThreshold: number;
   language: Lang;
+  theme: Theme;
 }
 
 export interface ConnectionCheck {
@@ -124,6 +127,22 @@ export interface StartResult {
 
 export type XpReason = "objective" | "on_time" | "strategic" | "critical";
 
+export interface Unlocked {
+  /** Family name for tiered achievements, otherwise the achievement id. */
+  id: string;
+  hidden: boolean;
+  goal: number | null;
+  level: number | null;
+}
+
+export interface TierProgress {
+  family: string;
+  value: number;
+  level: number;
+  prevGoal: number;
+  nextGoal: number;
+}
+
 export interface CompletionResult {
   outcome: "on_time" | "overtime" | "untimed";
   elapsedSeconds: number | null;
@@ -131,7 +150,7 @@ export interface CompletionResult {
   total: number;
   critical: boolean;
   questCompleted: { id: number; title: string; bonus: number } | null;
-  achievements: string[];
+  achievements: Unlocked[];
   levelBefore: number;
   levelAfter: number;
 }
@@ -179,13 +198,34 @@ export interface Stats {
   onTimeRuns: number;
   daily: { date: string; xp: number; objectives: number }[];
   calibration: { category: string; ratio: number; samples: number }[];
-  achievements: { id: string; unlockedAt: string | null }[];
+  tiers: TierProgress[];
+  /** Earned special achievements only; unearned ones stay invisible. */
+  specials: { id: string; unlockedAt: string }[];
+}
+
+/** What a danger-zone action removed. */
+export interface ClearSummary {
+  operations: number;
+  objectives: number;
+  runs: number;
+  /** Reset only: XP total before the reset. */
+  xp: number;
+  /** Reset only: achievements removed. */
+  achievements: number;
+}
+
+export interface TransferResult {
+  quests: number;
+  steps: number;
+  /** Import only: operations skipped as duplicates or finished work. */
+  skipped: number;
 }
 
 export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
   setLanguage: (language: Lang) => invoke<Settings>("set_language", { language }),
+  setTheme: (theme: Theme) => invoke<Settings>("set_theme", { theme }),
   setApiKey: (key: string) => invoke<void>("set_api_key", { key }),
   clearApiKey: () => invoke<void>("clear_api_key"),
   hasApiKey: () => invoke<boolean>("has_api_key"),
@@ -232,6 +272,10 @@ export const api = {
   clearTodayPlan: () => invoke<Today>("clear_today_plan"),
   debriefToday: () => invoke<Today>("debrief_today"),
   getStats: () => invoke<Stats>("get_stats"),
+  exportTasks: (path: string) => invoke<TransferResult>("export_tasks", { path }),
+  importTasks: (path: string) => invoke<TransferResult>("import_tasks", { path }),
+  clearFinished: () => invoke<ClearSummary>("clear_finished"),
+  resetProgress: () => invoke<ClearSummary>("reset_progress"),
 };
 
 export const events = {

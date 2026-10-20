@@ -195,27 +195,63 @@ export default function StatsPage() {
           )}
         </section>
 
-        <section className="panel">
+        <section className="panel ach-panel">
           <div className="panel-head">
             <h2 className="h-display" style={{ fontSize: 22 }}>{t("st.achievements")}</h2>
-            <span className="label mono">
-              {stats.achievements.filter((a) => a.unlockedAt).length}/{stats.achievements.length}
-            </span>
+            <span className="label mono">LV.{stats.tiers.reduce((n, f) => n + f.level, 0)}</span>
           </div>
-          <ul className="achievements">
-            {stats.achievements.map((a) => (
-              <li key={a.id} className={a.unlockedAt ? "unlocked" : ""}>
-                <span className="ach-badge" aria-hidden>{a.unlockedAt ? "◆" : "◇"}</span>
-                <div>
-                  <strong>{t(`ach.${a.id}` as TKey)}</strong>
-                  <span className="field-hint">
-                    {t(`ach.${a.id}.d` as TKey)}
-                    {!a.unlockedAt && ` · ${t("st.locked")}`}
+          <ul className="tier-list">
+            {stats.tiers.map((f) => {
+              const pct = Math.min(
+                100,
+                Math.round(((f.value - f.prevGoal) / Math.max(1, f.nextGoal - f.prevGoal)) * 100),
+              );
+              return (
+                <li key={f.family} className={`tier ${f.level > 0 ? "earned" : ""}`}>
+                  <div className="tier-badge" aria-label={`LV.${f.level}`}>
+                    <span className="label">LV</span>
+                    <span className="mono">{f.level}</span>
+                  </div>
+                  <div className="tier-body">
+                    <strong>{t(`fam.${f.family}` as TKey)}</strong>
+                    <span className="field-hint">{t(`fam.${f.family}.goal` as TKey, { n: f.nextGoal })}</span>
+                    <div
+                      className="tier-bar"
+                      role="progressbar"
+                      aria-valuenow={f.value}
+                      aria-valuemin={f.prevGoal}
+                      aria-valuemax={f.nextGoal}
+                    >
+                      <div style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                  <span className="label mono tier-count">
+                    {t("st.progress", { value: f.value, next: f.nextGoal })}
                   </span>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
+
+          {stats.specials.length > 0 && (
+            <>
+              <div className="panel-head" style={{ marginTop: 22 }}>
+                <h3 className="h-display" style={{ fontSize: 18 }}>{t("st.special")}</h3>
+                <span className="label mono">{stats.specials.length}</span>
+              </div>
+              <ul className="achievements">
+                {stats.specials.map((a) => (
+                  <li key={a.id} className="unlocked">
+                    <span className="ach-badge" aria-hidden>◆</span>
+                    <div>
+                      <strong>{t(`ach.${a.id}` as TKey)}</strong>
+                      <span className="field-hint">{t(`ach.${a.id}.d` as TKey)}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </section>
       </div>
     </div>

@@ -21,7 +21,7 @@ export function Toasts() {
               {x.lines.map((l, i) => (
                 <li key={i}>
                   <span>{l.label}</span>
-                  <span className="mono">+{l.amount}</span>
+                  {l.amount !== null && <span className="mono">+{l.amount}</span>}
                 </li>
               ))}
             </ul>

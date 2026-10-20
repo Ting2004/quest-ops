@@ -1,4 +1,5 @@
 mod coach;
+mod data;
 mod db;
 mod error;
 mod llm;
@@ -64,6 +65,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
@@ -82,6 +84,7 @@ pub fn run() {
             settings::get_settings,
             settings::save_settings,
             settings::set_language,
+            settings::set_theme,
             secrets::set_api_key,
             secrets::clear_api_key,
             secrets::has_api_key,
@@ -115,6 +118,10 @@ pub fn run() {
             today::plan_today,
             today::debrief_today,
             rewards::get_stats,
+            data::export_tasks,
+            data::import_tasks,
+            data::clear_finished,
+            data::reset_progress,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

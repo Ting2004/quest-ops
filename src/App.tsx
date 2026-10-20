@@ -32,6 +32,12 @@ export default function App() {
     document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
   }, [lang]);
 
+  // theme.css keys its light/dark tokens off this attribute.
+  const theme = settings?.theme ?? "dark";
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
   return (
     <I18nProvider lang={lang}>
       <AppProvider settings={settings} setSettings={setSettings}>
@@ -82,7 +88,7 @@ function Shell() {
           <span className="h-display" style={{ fontSize: 20 }}>{settings?.commanderName ?? "—"}</span>
           {stats && (
             <>
-              <span className="label mono" style={{ color: "var(--accent)" }}>
+              <span className="label mono" style={{ color: "var(--accent-text)" }}>
                 {t("side.level", { level: String(stats.level).padStart(2, "0") })}
               </span>
               <div
@@ -96,7 +102,7 @@ function Shell() {
               <div className="row" style={{ justifyContent: "space-between" }}>
                 <span className="label mono">{t("side.xp", { xp: stats.levelXp, need: stats.levelNeed })}</span>
                 {stats.streak > 0 && (
-                  <span className="label mono" style={{ color: "var(--accent)" }}>
+                  <span className="label mono" style={{ color: "var(--accent-text)" }}>
                     {t("side.streak", { n: stats.streak })}
                   </span>
                 )}

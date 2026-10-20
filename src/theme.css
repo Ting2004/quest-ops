@@ -18,12 +18,20 @@
   --text-muted: #8a8f95;
   --text-dim: #5b6066;
 
-  --accent: #ffe100;       /* strategic / primary */
+  --accent: #ffe100;       /* fills: buttons, bars, badges */
   --accent-ink: #111111;   /* text on accent */
+  --accent-text: #ffe100;  /* accent used as text or a thin line */
+  --accent-wash: rgba(255, 225, 0, 0.08);
+  --q2: #ffe100;           /* Strategic Ops quadrant */
+  --chart-bar: #ffe100;
   --danger: #ff4b3e;       /* emergency / overtime */
   --info: #3fd0e0;         /* logistics / system */
   --ok: #7ee081;
   --archive: #6b7077;
+
+  --sidebar-bg: rgba(12, 13, 15, 0.92);
+  --dock-bg: rgba(21, 23, 26, 0.96);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 
   --font-head: "Barlow Condensed", "Rajdhani", "Noto Sans SC", sans-serif;
   --font-ui: "Rajdhani", "Noto Sans SC", "Segoe UI", sans-serif;
@@ -33,6 +41,68 @@
   --sidebar-w: 220px;
 
   color-scheme: dark;
+}
+
+/* Light theme: off-white industrial. Yellow stays bright for fills and turns
+   to gold wherever it is text or a thin line, so it stays readable. */
+:root[data-theme="light"] {
+  --bg: #ebebe6;
+  --bg-grid: rgba(0, 0, 0, 0.04);
+  --panel: #f7f7f3;
+  --panel-raised: #ffffff;
+  --line: #d4d4cd;
+  --line-strong: #b3b3ab;
+  --text: #16181b;
+  --text-muted: #555a60;
+  --text-dim: #868b91;
+
+  --accent: #ffd900;
+  --accent-ink: #111111;
+  --accent-text: #8a6a00;
+  --accent-wash: rgba(255, 200, 0, 0.16);
+  --q2: #a68400;
+  --chart-bar: #a68400;
+  --danger: #d63a2c;
+  --info: #0b8798;
+  --ok: #2b8a3e;
+  --archive: #868b91;
+
+  --sidebar-bg: rgba(242, 242, 238, 0.96);
+  --dock-bg: rgba(247, 247, 243, 0.96);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] {
+    --bg: #ebebe6;
+    --bg-grid: rgba(0, 0, 0, 0.04);
+    --panel: #f7f7f3;
+    --panel-raised: #ffffff;
+    --line: #d4d4cd;
+    --line-strong: #b3b3ab;
+    --text: #16181b;
+    --text-muted: #555a60;
+    --text-dim: #868b91;
+
+    --accent: #ffd900;
+    --accent-ink: #111111;
+    --accent-text: #8a6a00;
+    --accent-wash: rgba(255, 200, 0, 0.16);
+    --q2: #a68400;
+    --chart-bar: #a68400;
+    --danger: #d63a2c;
+    --info: #0b8798;
+    --ok: #2b8a3e;
+    --archive: #868b91;
+
+    --sidebar-bg: rgba(242, 242, 238, 0.96);
+    --dock-bg: rgba(247, 247, 243, 0.96);
+    --shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+
+    color-scheme: light;
+  }
 }
 
 /* ------------------------------------------------------------------- base */
@@ -154,7 +224,7 @@ textarea, input { user-select: text; }
   clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
   transition: background 120ms, border-color 120ms, color 120ms;
 }
-.btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-text); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
@@ -198,7 +268,7 @@ textarea.input { resize: vertical; min-height: 110px; line-height: 1.5; }
   background: currentColor;
 }
 .status.ok { color: var(--ok); }
-.status.warn { color: var(--accent); }
+.status.warn { color: var(--accent-text); }
 .status.err { color: var(--danger); }
 .status.idle { color: var(--text-dim); }
 
@@ -213,12 +283,12 @@ textarea.input { resize: vertical; min-height: 110px; line-height: 1.5; }
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--line);
-  background: rgba(12, 13, 15, 0.92);
+  background: var(--sidebar-bg);
 }
 
 .brand { padding: 22px 20px 18px; border-bottom: 1px solid var(--line); }
 .brand .h-display { font-size: 30px; }
-.brand .h-display span { color: var(--accent); }
+.brand .h-display span { color: var(--accent-text); }
 
 .nav { display: flex; flex-direction: column; padding: 12px 0; gap: 2px; }
 .nav-item {
@@ -243,7 +313,7 @@ textarea.input { resize: vertical; min-height: 110px; line-height: 1.5; }
 .nav-item.active {
   color: var(--text);
   border-left-color: var(--accent);
-  background: linear-gradient(90deg, rgba(255, 225, 0, 0.08), transparent);
+  background: linear-gradient(90deg, var(--accent-wash), transparent);
 }
 
 .sidebar-foot {
@@ -282,7 +352,7 @@ textarea.input { resize: vertical; min-height: 110px; line-height: 1.5; }
   text-transform: uppercase;
 }
 .q1 { --q: var(--danger); }
-.q2 { --q: var(--accent); }
+.q2 { --q: var(--q2); }
 .q3 { --q: var(--info); }
 .q4 { --q: var(--archive); }
 
@@ -302,7 +372,7 @@ select.input option { background: var(--panel); }
   font-size: 11px;
   cursor: pointer;
 }
-.icon-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.icon-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-text); }
 .icon-btn.danger:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }
 .icon-btn:disabled { opacity: 0.25; cursor: not-allowed; }
 
@@ -316,7 +386,7 @@ select.input option { background: var(--panel); }
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent);
 }
-.objective-index { font-size: 22px; font-weight: 700; color: var(--accent); line-height: 1.2; }
+.objective-index { font-size: 22px; font-weight: 700; color: var(--accent-text); line-height: 1.2; }
 .objective-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .objective-title { font-family: var(--font-ui); font-size: 17px; font-weight: 700; }
 .objective-tools { display: flex; flex-direction: column; gap: 4px; }
@@ -334,7 +404,7 @@ select.input option { background: var(--panel); }
 .quest-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .quest-row-title { font-size: 17px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .empty-note { margin: 0; color: var(--text-dim); font-size: 15px; }
-.quest-row.selected { border-color: var(--accent); background: rgba(255, 225, 0, 0.05); }
+.quest-row.selected { border-color: var(--accent); background: var(--accent-wash); }
 .quest-row .quest-row-main { cursor: pointer; }
 .batch-bar { margin-bottom: 12px; }
 

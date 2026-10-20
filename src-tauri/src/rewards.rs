@@ -33,9 +33,9 @@ pub const GENERAL_CATEGORY: &str = "General";
 
 /// Returns (level, xp into the level, xp needed for the next level).
 pub fn level_for(total_xp: i64) -> (i64, i64, i64) {
-    let (mut level, mut rest) = (1, total_xp.max(0));
+    let (mut level, mut rest) = (0, total_xp.max(0));
     loop {
-        let need = 100 + 25 * (level - 1);
+        let need = 100 + 25 * level;
         if rest < need {
             return (level, rest, need);
         }
@@ -123,7 +123,7 @@ pub struct CompletionResult {
     pub total: i64,
     pub critical: bool,
     pub quest_completed: Option<QuestDone>,
-    pub achievements: Vec<String>,
+    pub achievements: Vec<Unlocked>,
     pub level_before: i64,
     pub level_after: i64,
 }
@@ -213,6 +213,10 @@ pub fn complete(conn: &mut Connection, step_id: i64, timing: Option<Timing>) -> 
             award(&tx, quest_id, None, extra, "operation_strategic")?;
             bonus += extra;
         }
+        if quadrant == Some(4) {
+            // Zero-XP marker: quadrants drift with deadlines, so record it now.
+            award(&tx, quest_id, None, 0, "operation_archive")?;
+        }
         tx.execute(
             "UPDATE quest SET status = 'completed', completed_at = datetime('now') WHERE id = ?1",
             [quest_id],
@@ -292,24 +296,125 @@ pub fn calibration_for(conn: &Connection, quest_id: i64) -> AppResult<Option<f64
 
 // ---------------------------------------------------------- achievements
 
-pub const ACHIEVEMENTS: &[&str] = &[
-    "first_objective",
-    "objectives_10",
-    "objectives_50",
-    "objectives_100",
-    "first_operation",
-    "operations_10",
-    "strategic_5",
-    "on_time_10",
-    "streak_3",
-    "streak_7",
-    "streak_30",
-    "level_5",
-    "level_10",
+/// Tiered achievement families. Each tier is stored as `"{family}:{goal}"`.
+/// Past the last listed goal, each further goal doubles the previous one.
+const FAMILIES: &[(&str, &[i64])] = &[
+    ("objectives", &[1, 10, 50, 100, 200, 500, 1000, 2000, 5000, 10000]),
+    ("operations", &[1, 5, 10, 25, 50, 100, 200, 500, 1000]),
+    ("strategic", &[1, 5, 10, 25, 50, 100, 250, 500]),
+    ("on_time", &[1, 10, 25, 50, 100, 250, 500, 1000, 2500]),
+    ("streak", &[3, 7, 14, 30, 60, 100, 180, 365]),
+    ("level", &[5, 10, 20, 30, 40, 50, 75, 100]),
+    ("focus_hours", &[1, 5, 10, 25, 50, 100, 250, 500, 1000]),
+];
+
+/// Goal of tier `i` (0-based).
+pub fn tier_goal(tiers: &[i64], i: usize) -> i64 {
+    match tiers.get(i) {
+        Some(&g) => g,
+        None => tiers.last().copied().unwrap_or(1) << (i + 1 - tiers.len()).min(40),
+    }
+}
+
+/// How many tiers `value` has reached.
+pub fn tiers_reached(tiers: &[i64], value: i64) -> usize {
+    (0..).take_while(|&i| tier_goal(tiers, i) <= value).count()
+}
+
+fn family_value(conn: &Connection, family: &str) -> AppResult<i64> {
+    Ok(match family {
+        // Counted from the XP log so clearing finished work keeps the progress.
+        "objectives" => count(conn, "SELECT COUNT(*) FROM xp_event WHERE reason = 'objective'")?,
+        "operations" => count(conn, "SELECT COUNT(*) FROM xp_event WHERE reason = 'operation'")?,
+        "strategic" => count(conn, "SELECT COUNT(*) FROM xp_event WHERE reason = 'operation_strategic'")?,
+        "on_time" => count(conn, "SELECT COUNT(*) FROM xp_event WHERE reason = 'on_time'")?,
+        "streak" => {
+            let (days, today) = active_days(conn)?;
+            streaks(days, today).1
+        }
+        "level" => level_for(total_xp(conn)?).0,
+        "focus_hours" => count(
+            conn,
+            "SELECT ((SELECT archived_focus_ms FROM profile) + COALESCE(SUM(ended_ms - started_ms - paused_ms), 0)) / 3600000
+             FROM timer_session WHERE outcome IN ('on_time', 'overtime')",
+        )?,
+        _ => 0,
+    })
+}
+
+/// Special achievements, invisible until earned. Each is a query that is
+/// true once the feat has happened at least once.
+const HIDDEN_ACHIEVEMENTS: &[(&str, &str)] = &[
+    (
+        "night_owl",
+        "SELECT 1 FROM step WHERE status = 'done'
+           AND CAST(strftime('%H', completed_at, 'localtime') AS INTEGER) < 4",
+    ),
+    (
+        "early_bird",
+        "SELECT 1 FROM step WHERE status = 'done'
+           AND CAST(strftime('%H', completed_at, 'localtime') AS INTEGER) BETWEEN 4 AND 6",
+    ),
+    (
+        "photo_finish",
+        "SELECT 1 FROM timer_session WHERE outcome = 'on_time'
+           AND ended_ms - started_ms - paused_ms >= planned_seconds * 1000 - 30000",
+    ),
+    (
+        "speedrun",
+        "SELECT 1 FROM timer_session WHERE outcome = 'on_time' AND planned_seconds >= 600
+           AND ended_ms - started_ms - paused_ms <= planned_seconds * 250",
+    ),
+    (
+        "marathon",
+        "SELECT 1 FROM timer_session WHERE outcome IN ('on_time', 'overtime')
+           AND ended_ms - started_ms - paused_ms >= 3600000",
+    ),
+    (
+        "comeback",
+        "SELECT 1 FROM step s WHERE s.status = 'done'
+           AND EXISTS (SELECT 1 FROM timer_session t WHERE t.step_id = s.id AND t.outcome = 'aborted')
+           AND EXISTS (SELECT 1 FROM timer_session t WHERE t.step_id = s.id
+                       AND t.outcome IN ('on_time', 'overtime'))",
+    ),
+    (
+        "fortune",
+        "SELECT 1 FROM xp_event WHERE reason = 'critical' GROUP BY reason HAVING COUNT(*) >= 3",
+    ),
+    (
+        "flawless",
+        "SELECT 1 FROM quest q WHERE q.status = 'completed'
+           AND (SELECT COUNT(*) FROM step s WHERE s.quest_id = q.id AND s.parent_step_id IS NULL) >= 3
+           AND NOT EXISTS (
+               SELECT 1 FROM step s WHERE s.quest_id = q.id AND s.parent_step_id IS NULL
+                 AND NOT EXISTS (SELECT 1 FROM timer_session t
+                                 WHERE t.step_id = s.id AND t.outcome = 'on_time'))",
+    ),
+    (
+        "just_in_time",
+        "SELECT 1 FROM quest WHERE status = 'completed' AND deadline IS NOT NULL
+           AND date(completed_at, 'localtime') = deadline",
+    ),
+    (
+        "someday",
+        "SELECT 1 FROM xp_event WHERE reason = 'operation_archive'",
+    ),
+    (
+        "weekend_warrior",
+        "SELECT 1 FROM (SELECT DISTINCT date(created_at, 'localtime') AS d
+                        FROM xp_event WHERE reason = 'objective') sat
+         WHERE strftime('%w', sat.d) = '6'
+           AND EXISTS (SELECT 1 FROM xp_event sun WHERE sun.reason = 'objective'
+                       AND date(sun.created_at, 'localtime') = date(sat.d, '+1 day'))",
+    ),
 ];
 
 fn count(conn: &Connection, sql: &str) -> AppResult<i64> {
     Ok(conn.query_row(sql, [], |r| r.get(0))?)
+}
+
+fn exists(conn: &Connection, sql: &str) -> AppResult<bool> {
+    Ok(count(conn, &format!("SELECT EXISTS ({sql})"))? == 1)
 }
 
 fn active_days(conn: &Connection) -> AppResult<(Vec<i64>, i64)> {
@@ -322,35 +427,45 @@ fn active_days(conn: &Connection) -> AppResult<(Vec<i64>, i64)> {
     Ok((days, today))
 }
 
-/// Unlocks every achievement whose condition now holds; returns the new ones.
-fn check_achievements(conn: &Connection) -> AppResult<Vec<String>> {
-    let objectives = count(conn, "SELECT COUNT(*) FROM step WHERE status = 'done'")?;
-    let operations = count(conn, "SELECT COUNT(*) FROM quest WHERE status = 'completed'")?;
-    let strategic = count(conn, "SELECT COUNT(*) FROM xp_event WHERE reason = 'operation_strategic'")?;
-    let on_time = count(conn, "SELECT COUNT(*) FROM xp_event WHERE reason = 'on_time'")?;
-    let (days, today) = active_days(conn)?;
-    let (_, longest) = streaks(days, today);
-    let level = level_for(total_xp(conn)?).0;
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Unlocked {
+    /// Family name for tiered achievements, otherwise the achievement id.
+    pub id: String,
+    /// A special achievement that was invisible until now.
+    pub hidden: bool,
+    /// The goal reached, for tiered achievements.
+    pub goal: Option<i64>,
+    /// The tier number (1-based), for tiered achievements.
+    pub level: Option<i64>,
+}
 
-    let earned = [
-        ("first_objective", objectives >= 1),
-        ("objectives_10", objectives >= 10),
-        ("objectives_50", objectives >= 50),
-        ("objectives_100", objectives >= 100),
-        ("first_operation", operations >= 1),
-        ("operations_10", operations >= 10),
-        ("strategic_5", strategic >= 5),
-        ("on_time_10", on_time >= 10),
-        ("streak_3", longest >= 3),
-        ("streak_7", longest >= 7),
-        ("streak_30", longest >= 30),
-        ("level_5", level >= 5),
-        ("level_10", level >= 10),
-    ];
+/// Unlocks every achievement whose condition now holds; returns the new ones.
+fn check_achievements(conn: &Connection) -> AppResult<Vec<Unlocked>> {
+    let insert = |id: &str| -> AppResult<bool> {
+        Ok(conn.execute("INSERT OR IGNORE INTO achievement (id) VALUES (?1)", [id])? == 1)
+    };
     let mut new = Vec::new();
-    for (id, ok) in earned {
-        if ok && conn.execute("INSERT OR IGNORE INTO achievement (id) VALUES (?1)", [id])? == 1 {
-            new.push(id.to_string());
+    for (family, tiers) in FAMILIES {
+        // Record every tier reached; announce only the highest new one.
+        let mut highest = None;
+        for i in 0..tiers_reached(tiers, family_value(conn, family)?) {
+            if insert(&format!("{family}:{}", tier_goal(tiers, i)))? {
+                highest = Some(i);
+            }
+        }
+        if let Some(i) = highest {
+            new.push(Unlocked {
+                id: family.to_string(),
+                hidden: false,
+                goal: Some(tier_goal(tiers, i)),
+                level: Some(i as i64 + 1),
+            });
+        }
+    }
+    for (id, sql) in HIDDEN_ACHIEVEMENTS {
+        if exists(conn, sql)? && insert(id)? {
+            new.push(Unlocked { id: id.to_string(), hidden: true, goal: None, level: None });
         }
     }
     Ok(new)
@@ -376,9 +491,21 @@ pub struct Calibration {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Achievement {
+pub struct TierProgress {
+    pub family: String,
+    pub value: i64,
+    /// Tiers reached so far (0 before the first goal).
+    pub level: i64,
+    /// Goal of the tier reached last (0 before the first goal).
+    pub prev_goal: i64,
+    pub next_goal: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpecialAchievement {
     pub id: String,
-    pub unlocked_at: Option<String>,
+    pub unlocked_at: String,
 }
 
 #[derive(Serialize)]
@@ -398,7 +525,9 @@ pub struct Stats {
     pub on_time_runs: i64,
     pub daily: Vec<DayXp>,
     pub calibration: Vec<Calibration>,
-    pub achievements: Vec<Achievement>,
+    pub tiers: Vec<TierProgress>,
+    /// Earned special achievements only; unearned ones stay invisible.
+    pub specials: Vec<SpecialAchievement>,
 }
 
 #[tauri::command]
@@ -434,16 +563,28 @@ pub fn get_stats(db: State<'_, Db>) -> AppResult<Stats> {
         .collect();
     calibration.sort_by(|a, b| b.samples.cmp(&a.samples));
 
-    let mut stmt = conn.prepare("SELECT unlocked_at FROM achievement WHERE id = ?1")?;
-    let achievements = ACHIEVEMENTS
+    let tiers = FAMILIES
         .iter()
-        .map(|id| {
-            Ok(Achievement {
-                id: id.to_string(),
-                unlocked_at: stmt.query_row([id], |r| r.get(0)).optional()?,
+        .map(|(family, goals)| {
+            let value = family_value(&conn, family)?;
+            let level = tiers_reached(goals, value);
+            Ok(TierProgress {
+                family: family.to_string(),
+                value,
+                level: level as i64,
+                prev_goal: if level == 0 { 0 } else { tier_goal(goals, level - 1) },
+                next_goal: tier_goal(goals, level),
             })
         })
         .collect::<AppResult<Vec<_>>>()?;
+
+    let mut stmt = conn.prepare("SELECT unlocked_at FROM achievement WHERE id = ?1")?;
+    let mut specials = Vec::new();
+    for (id, _) in HIDDEN_ACHIEVEMENTS {
+        if let Some(unlocked_at) = stmt.query_row([id], |r| r.get(0)).optional()? {
+            specials.push(SpecialAchievement { id: id.to_string(), unlocked_at });
+        }
+    }
 
     Ok(Stats {
         total_xp: total,
@@ -454,8 +595,8 @@ pub fn get_stats(db: State<'_, Db>) -> AppResult<Stats> {
         longest_streak,
         today_xp,
         today_objectives,
-        objectives_done: count(&conn, "SELECT COUNT(*) FROM step WHERE status = 'done'")?,
-        operations_done: count(&conn, "SELECT COUNT(*) FROM quest WHERE status = 'completed'")?,
+        objectives_done: count(&conn, "SELECT COUNT(*) FROM xp_event WHERE reason = 'objective'")?,
+        operations_done: count(&conn, "SELECT COUNT(*) FROM xp_event WHERE reason = 'operation'")?,
         timed_runs: count(
             &conn,
             "SELECT COUNT(*) FROM timer_session WHERE outcome IN ('on_time', 'overtime')",
@@ -463,7 +604,8 @@ pub fn get_stats(db: State<'_, Db>) -> AppResult<Stats> {
         on_time_runs: count(&conn, "SELECT COUNT(*) FROM timer_session WHERE outcome = 'on_time'")?,
         daily,
         calibration,
-        achievements,
+        tiers,
+        specials,
     })
 }
 
@@ -485,6 +627,104 @@ mod tests {
         conn
     }
 
+    /// Announced unlocks as "family:goal" for tiers, plain ids otherwise.
+    fn unlocked(r: &CompletionResult) -> Vec<String> {
+        r.achievements
+            .iter()
+            .map(|a| match a.goal {
+                Some(g) => format!("{}:{g}", a.id),
+                None => a.id.clone(),
+            })
+            .collect()
+    }
+
+    fn has(r: &CompletionResult, id: &str) -> bool {
+        unlocked(r).iter().any(|u| u == id)
+    }
+
+    #[test]
+    fn tier_goals_extend_by_doubling() {
+        let goals = [1, 10, 50, 100];
+        assert_eq!(tier_goal(&goals, 0), 1);
+        assert_eq!(tier_goal(&goals, 3), 100);
+        assert_eq!(tier_goal(&goals, 4), 200);
+        assert_eq!(tier_goal(&goals, 5), 400);
+        assert_eq!(tiers_reached(&goals, 0), 0);
+        assert_eq!(tiers_reached(&goals, 9), 1);
+        assert_eq!(tiers_reached(&goals, 10), 2);
+        assert_eq!(tiers_reached(&goals, 250), 5);
+    }
+
+    #[test]
+    fn old_milestones_carry_over_as_tiers() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(crate::db::MIGRATIONS[..3].concat().as_str()).unwrap();
+        conn.execute("INSERT INTO achievement (id) VALUES ('first_objective'), ('streak_3')", [])
+            .unwrap();
+        conn.pragma_update(None, "user_version", 3).unwrap();
+        crate::db::migrate_for_test(&mut conn);
+        let ids: Vec<String> = conn
+            .prepare("SELECT id FROM achievement ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(ids, ["objectives:1", "streak:3"]);
+    }
+
+    /// A finished timer session of `elapsed_s` on a 10-minute estimate.
+    fn timed(conn: &Connection, session_id: i64, step_id: i64, elapsed_s: i64) -> Timing {
+        conn.execute(
+            "INSERT INTO timer_session (id, step_id, started_at, started_ms, planned_seconds)
+             VALUES (?1, ?2, datetime('now'), 0, 600)",
+            params![session_id, step_id],
+        )
+        .unwrap();
+        Timing { session_id, elapsed_ms: elapsed_s * 1000, planned_seconds: 600, now_ms: elapsed_s * 1000 }
+    }
+
+    #[test]
+    fn hidden_achievements_unlock_from_play_patterns() {
+        let mut conn = seeded();
+        // 9:50 of 10:00: on time with 10 seconds to spare.
+        let t = timed(&conn, 1, 1, 590);
+        let a = complete(&mut conn, 1, Some(t)).unwrap();
+        assert!(has(&a, "photo_finish"));
+        assert!(a.achievements.iter().any(|x| x.id == "photo_finish" && x.hidden));
+        assert!(!has(&a, "speedrun"));
+
+        // Abort a run on step 2, then finish it: second wind.
+        conn.execute(
+            "INSERT INTO timer_session (id, step_id, started_at, started_ms, planned_seconds,
+                                        ended_at, ended_ms, outcome)
+             VALUES (2, 2, datetime('now'), 0, 600, datetime('now'), 1000, 'aborted')",
+            [],
+        )
+        .unwrap();
+        let t = timed(&conn, 3, 2, 300);
+        let b = complete(&mut conn, 2, Some(t)).unwrap();
+        assert!(has(&b, "comeback"));
+        assert!(!has(&b, "someday"), "operation 1 was Q2");
+
+        // An Archive (Q4) operation completed: someday is today.
+        conn.execute_batch(
+            "INSERT INTO quest (id, title, status, importance, urgency_base)
+                 VALUES (2, 'Chore', 'active', 1, 1);
+             INSERT INTO step (id, quest_id, title, effort, est_minutes, order_index)
+                 VALUES (3, 2, 'C', 1, 10, 0);",
+        )
+        .unwrap();
+        let c = complete(&mut conn, 3, None).unwrap();
+        assert!(has(&c, "someday"));
+
+        let stats_hidden: i64 = conn
+            .query_row("SELECT COUNT(*) FROM achievement WHERE id IN
+                        ('photo_finish', 'comeback', 'someday')", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(stats_hidden, 3);
+    }
+
     fn reasons(r: &CompletionResult) -> Vec<&str> {
         r.lines.iter().map(|l| l.reason.as_str()).filter(|r| *r != "critical").collect()
     }
@@ -497,14 +737,14 @@ mod tests {
         assert_eq!(a.outcome, "on_time");
         assert_eq!(reasons(&a), ["objective", "on_time", "strategic"]);
         assert!(a.quest_completed.is_none());
-        assert!(a.achievements.contains(&"first_objective".to_string()));
+        assert!(has(&a, "objectives:1"));
 
         let b = complete(&mut conn, 2, None).unwrap();
         assert_eq!(b.outcome, "untimed");
         assert_eq!(reasons(&b), ["objective", "strategic"]);
         let done = b.quest_completed.as_ref().unwrap();
         assert_eq!(done.bonus, 30 + 15); // 20 + 5 per objective, +50% strategic
-        assert!(b.achievements.contains(&"first_operation".to_string()));
+        assert!(has(&b, "operations:1"));
 
         let status: String =
             conn.query_row("SELECT status FROM quest WHERE id = 1", [], |r| r.get(0)).unwrap();
@@ -533,10 +773,10 @@ mod tests {
 
     #[test]
     fn level_curve() {
-        assert_eq!(level_for(0), (1, 0, 100));
-        assert_eq!(level_for(99), (1, 99, 100));
-        assert_eq!(level_for(100), (2, 0, 125));
-        assert_eq!(level_for(225), (3, 0, 150));
+        assert_eq!(level_for(0), (0, 0, 100));
+        assert_eq!(level_for(99), (0, 99, 100));
+        assert_eq!(level_for(100), (1, 0, 125));
+        assert_eq!(level_for(225), (2, 0, 150));
     }
 
     #[test]

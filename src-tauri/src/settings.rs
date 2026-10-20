@@ -21,12 +21,15 @@ pub struct Settings {
     pub importance_threshold: i64,
     /// Interface and AI output language: "en" or "zh".
     pub language: String,
+    /// Colour theme: "dark", "light" or "system". Changed only through `set_theme`.
+    #[serde(default)]
+    pub theme: String,
 }
 
 pub fn load(conn: &rusqlite::Connection) -> AppResult<Settings> {
     Ok(conn.query_row(
         "SELECT commander_name, goals_text, model_name, small_model_name, api_base_url,
-                max_pauses, urgent_within_days, importance_threshold, language
+                max_pauses, urgent_within_days, importance_threshold, language, theme
          FROM profile WHERE id = 1",
         [],
         |r| {
@@ -40,6 +43,7 @@ pub fn load(conn: &rusqlite::Connection) -> AppResult<Settings> {
                 urgent_within_days: r.get(6)?,
                 importance_threshold: r.get(7)?,
                 language: r.get(8)?,
+                theme: r.get(9)?,
             })
         },
     )?)
@@ -94,5 +98,16 @@ pub fn set_language(db: State<'_, Db>, language: String) -> AppResult<Settings> 
     }
     let conn = db.0.lock().map_err(|_| AppError::Msg("database lock poisoned".into()))?;
     conn.execute("UPDATE profile SET language = ?1 WHERE id = 1", [language])?;
+    load(&conn)
+}
+
+/// Switches the colour theme immediately.
+#[tauri::command]
+pub fn set_theme(db: State<'_, Db>, theme: String) -> AppResult<Settings> {
+    if !["dark", "light", "system"].contains(&theme.as_str()) {
+        return Err(AppError::Msg("theme must be dark, light or system".into()));
+    }
+    let conn = db.0.lock().map_err(|_| AppError::Msg("database lock poisoned".into()))?;
+    conn.execute("UPDATE profile SET theme = ?1 WHERE id = 1", [theme])?;
     load(&conn)
 }

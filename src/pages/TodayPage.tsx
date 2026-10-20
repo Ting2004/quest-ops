@@ -177,7 +177,7 @@ export default function TodayPage({ onNavigate }: { onNavigate: (p: "inbox") => 
                     <span className="quest-row-title">{s.title}</span>
                     <span className="label">{s.questTitle}</span>
                   </div>
-                  <span className="mono" style={{ color: "var(--accent)" }}>+{s.xp}</span>
+                  <span className="mono" style={{ color: "var(--accent-text)" }}>+{s.xp}</span>
                 </li>
               ))}
             </ul>

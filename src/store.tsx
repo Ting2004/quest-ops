@@ -9,7 +9,7 @@ import {
   type Stats,
   type TimerView,
 } from "./api";
-import { useT } from "./i18n";
+import { useT, type TKey } from "./i18n";
 import { sound } from "./sound";
 
 export interface Toast {
@@ -17,7 +17,7 @@ export interface Toast {
   kind: "xp" | "achievement" | "level" | "error" | "info";
   title: string;
   detail?: string;
-  lines?: { label: string; amount: number }[];
+  lines?: { label: string; amount: number | null }[];
   critical?: boolean;
 }
 
@@ -128,12 +128,19 @@ export function AppProvider({
         toast({ kind: "level", title: t("rw.levelUp", { n: r.levelAfter }) });
       }
       for (const a of r.achievements) {
+        const tiered = a.goal !== null && a.level !== null;
         toast({
           kind: "achievement",
-          title: t(`ach.${a}` as Parameters<typeof t>[0]),
           detail: t("rw.achievement"),
+          title: tiered
+            ? `${t(`fam.${a.id}` as TKey)} LV.${a.level}`
+            : t(`ach.${a.id}` as TKey),
+          lines: tiered
+            ? [{ label: t(`fam.${a.id}.goal` as TKey, { n: a.goal! }), amount: null }]
+            : [{ label: t(`ach.${a.id}.d` as TKey), amount: null }],
         });
       }
+      if (r.achievements.length) setTimeout(() => sound.critical(), 400);
       if (r.questCompleted) {
         setMission({ title: r.questCompleted.title, bonus: r.questCompleted.bonus });
         setTimeout(() => sound.mission(), 250);
