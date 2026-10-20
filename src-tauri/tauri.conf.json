@@ -26,7 +26,21 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
+    "publisher": "Quest Ops",
+    "shortDescription": "Break big tasks into timed objectives and earn rewards",
+    "longDescription": "Quest Ops turns large to-do items into short, timed objectives with AI help, prioritises them on an Eisenhower matrix, and rewards finishing them with XP, levels and achievements.",
+    "copyright": "Copyright 2026",
+    "category": "Productivity",
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["English", "SimpChinese"],
+        "displayLanguageSelector": true,
+        "installerIcon": "icons/icon.ico"
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
