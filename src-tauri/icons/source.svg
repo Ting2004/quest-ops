@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- chamfered plate -->
+  <path d="M96 40 H880 L984 144 V928 Q984 984 928 984 H144 L40 880 V96 Q40 40 96 40 Z" fill="#15171a"/>
+  <path d="M96 40 H880 L984 144 V928 Q984 984 928 984 H144 L40 880 V96 Q40 40 96 40 Z"
+        fill="none" stroke="#3d4248" stroke-width="12"/>
+  <!-- corner brackets -->
+  <path d="M120 300 V120 H300" fill="none" stroke="#ffe100" stroke-width="44" stroke-linecap="square"/>
+  <path d="M904 724 V904 H724" fill="none" stroke="#ffe100" stroke-width="44" stroke-linecap="square"/>
+  <!-- target diamond with checked core -->
+  <path d="M512 232 L792 512 L512 792 L232 512 Z" fill="none" stroke="#e8e8e4" stroke-width="40"/>
+  <path d="M512 372 L652 512 L512 652 L372 512 Z" fill="#ffe100"/>
+  <!-- hazard tick marks -->
+  <path d="M600 140 L660 140 L620 200 L560 200 Z M700 140 L760 140 L720 200 L660 200 Z" fill="#ffe100"/>
+</svg>
