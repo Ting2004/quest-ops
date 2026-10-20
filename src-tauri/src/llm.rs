@@ -1,5 +1,7 @@
-//! OpenAI client. Uses Chat Completions with strict JSON-schema output so every
-//! response deserializes straight into a Rust type.
+//! Chat client for OpenAI and OpenAI-compatible APIs (DeepSeek, custom).
+//! OpenAI gets strict JSON-schema output; providers without it get JSON mode
+//! with the schema spelled out in the prompt. Either way every reply
+//! deserializes straight into a Rust type.
 
 use std::time::Duration;
 
@@ -14,12 +16,32 @@ use crate::{
     settings::{self, Settings},
 };
 
+/// Models listed back to the interface after a link test.
+const MAX_LISTED_MODELS: usize = 40;
+/// Output budget for JSON-mode providers, which may truncate without one.
+const JSON_MODE_MAX_TOKENS: u32 = 4096;
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionCheck {
     pub ok: bool,
     pub model: String,
     pub message: String,
+    /// Model IDs the key can use, so the person can pick an exact one.
+    pub available: Vec<String>,
+}
+
+fn provider_name(provider: &str) -> &'static str {
+    match provider {
+        "deepseek" => "DeepSeek",
+        "custom" => "API",
+        _ => "OpenAI",
+    }
+}
+
+/// Only OpenAI is relied on for strict `json_schema` output.
+fn supports_json_schema(provider: &str) -> bool {
+    provider == "openai"
 }
 
 fn load_settings(db: &Db) -> AppResult<Settings> {
@@ -27,64 +49,71 @@ fn load_settings(db: &Db) -> AppResult<Settings> {
     settings::load(&conn)
 }
 
-fn require_key() -> AppResult<String> {
-    secrets::get_api_key()?.ok_or_else(|| AppError::Msg("no API key saved. Open Config.".into()))
+fn require_key(s: &Settings) -> AppResult<String> {
+    secrets::get_api_key(&s.provider)?.ok_or_else(|| {
+        AppError::Msg(format!("no {} API key saved. Open Config.", provider_name(&s.provider)))
+    })
 }
 
 fn client() -> AppResult<reqwest::Client> {
     Ok(reqwest::Client::builder().timeout(Duration::from_secs(180)).build()?)
 }
 
-/// Looks up the configured model via `GET /models/{id}`. This confirms the key
-/// works and the model name exists without spending any tokens.
+/// Lists models via `GET /models` (supported by OpenAI and DeepSeek). This
+/// confirms the key works and the model name exists without spending tokens.
 #[tauri::command]
 pub async fn test_llm_connection(db: State<'_, Db>) -> AppResult<ConnectionCheck> {
     let s = load_settings(&db)?;
-    if s.model_name.is_empty() {
-        return Err(AppError::Msg("set a model name first".into()));
-    }
-    let key = require_key()?;
-
-    let url = format!("{}/models/{}", s.api_base_url, s.model_name);
-    let res = client()?.get(url).bearer_auth(key).send().await?;
+    let key = require_key(&s)?;
+    let res = client()?.get(format!("{}/models", s.api_base_url)).bearer_auth(key).send().await?;
     let status = res.status();
+    let name = provider_name(&s.provider);
 
-    let message = match status.as_u16() {
-        200 => "Link established. Key and model verified.".to_string(),
-        401 => "API key rejected (401). Check the key.".to_string(),
-        404 => format!("Model \"{}\" not found (404). Check the exact model ID.", s.model_name),
-        429 => "Rate limited or out of credit (429).".to_string(),
-        code => format!("Unexpected response ({code})."),
+    let fail = |message: String| ConnectionCheck {
+        ok: false,
+        model: s.model_name.clone(),
+        message,
+        available: Vec::new(),
     };
-    Ok(ConnectionCheck { ok: status.is_success(), model: s.model_name, message })
+    match status.as_u16() {
+        200 => {}
+        401 => return Ok(fail(format!("{name} rejected the API key (401). Check the key."))),
+        404 => return Ok(fail(format!("No model list at this address (404). Check the API base URL."))),
+        429 => return Ok(fail("Rate limited or out of credit (429).".into())),
+        code => return Ok(fail(format!("Unexpected response from {name} ({code})."))),
+    }
+
+    let payload: Value = res.json().await.unwrap_or(Value::Null);
+    let mut available: Vec<String> = payload["data"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|m| m["id"].as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    available.sort();
+    available.truncate(MAX_LISTED_MODELS);
+
+    let wanted: Vec<&str> =
+        [&s.model_name, &s.small_model_name].into_iter().map(String::as_str).filter(|m| !m.is_empty()).collect();
+    let missing: Vec<&str> =
+        wanted.iter().copied().filter(|m| !available.iter().any(|a| a == m)).collect();
+
+    let (ok, message) = if s.model_name.is_empty() {
+        (false, format!("{name} key works. Pick a model below."))
+    } else if available.is_empty() {
+        (true, format!("{name} key works. The model list was empty, so the model name is unchecked."))
+    } else if missing.is_empty() {
+        (true, format!("Link established with {name}. Key and model verified."))
+    } else {
+        (false, format!("{name} key works, but \"{}\" is not available. Pick a model below.", missing.join("\", \"")))
+    };
+    Ok(ConnectionCheck { ok, model: s.model_name, message, available })
 }
 
-/// Sends one system + user exchange and parses the schema-constrained reply.
-pub(crate) async fn chat_json<T: DeserializeOwned>(
-    s: &Settings,
-    model: &str,
-    system: &str,
-    user: &str,
-    schema_name: &str,
-    schema: Value,
-) -> AppResult<T> {
-    let key = require_key()?;
-    let body = json!({
-        "model": model,
-        "messages": [
-            { "role": "system", "content": system },
-            { "role": "user", "content": user },
-        ],
-        "response_format": {
-            "type": "json_schema",
-            "json_schema": { "name": schema_name, "strict": true, "schema": schema },
-        },
-    });
-
+/// One request. Returns the reply text, or an error that is not worth retrying.
+async fn request(s: &Settings, key: &str, body: &Value) -> AppResult<Option<String>> {
     let res = client()?
         .post(format!("{}/chat/completions", s.api_base_url))
         .bearer_auth(key)
-        .json(&body)
+        .json(body)
         .send()
         .await?;
     let status = res.status();
@@ -92,7 +121,11 @@ pub(crate) async fn chat_json<T: DeserializeOwned>(
 
     if !status.is_success() {
         let detail = payload["error"]["message"].as_str().unwrap_or("no details");
-        return Err(AppError::Msg(format!("OpenAI error ({}): {detail}", status.as_u16())));
+        return Err(AppError::Msg(format!(
+            "{} error ({}): {detail}",
+            provider_name(&s.provider),
+            status.as_u16()
+        )));
     }
 
     let choice = &payload["choices"][0];
@@ -102,11 +135,74 @@ pub(crate) async fn chat_json<T: DeserializeOwned>(
     if choice["finish_reason"] == "length" {
         return Err(AppError::Msg("model reply was cut off. Try a shorter task.".into()));
     }
-    let content = choice["message"]["content"]
-        .as_str()
-        .ok_or_else(|| AppError::Msg("model returned no content".into()))?;
-    serde_json::from_str(content)
-        .map_err(|e| AppError::Msg(format!("could not parse model reply: {e}")))
+    // DeepSeek's JSON mode can occasionally return empty content.
+    Ok(choice["message"]["content"].as_str().map(str::trim).filter(|c| !c.is_empty()).map(String::from))
+}
+
+/// Strips a ```json fence some JSON-mode models wrap around their reply.
+fn unfence(text: &str) -> &str {
+    let t = text.trim();
+    let t = t.strip_prefix("```json").or_else(|| t.strip_prefix("```")).unwrap_or(t);
+    t.strip_suffix("```").unwrap_or(t).trim()
+}
+
+/// Sends one system + user exchange and parses the schema-shaped reply,
+/// asking once more if the first reply is empty or does not fit the schema.
+pub(crate) async fn chat_json<T: DeserializeOwned>(
+    s: &Settings,
+    model: &str,
+    system: &str,
+    user: &str,
+    schema_name: &str,
+    schema: Value,
+) -> AppResult<T> {
+    let key = require_key(s)?;
+    let strict = supports_json_schema(&s.provider);
+    let system = if strict {
+        system.to_string()
+    } else {
+        format!(
+            "{system}\n\nReply with a single JSON object and nothing else. It must match \
+             this JSON schema exactly, with every listed field present:\n{schema}"
+        )
+    };
+    let mut messages = vec![
+        json!({ "role": "system", "content": system }),
+        json!({ "role": "user", "content": user }),
+    ];
+
+    let mut last_error = String::new();
+    for _attempt in 0..2 {
+        let mut body = json!({ "model": model, "messages": messages });
+        if strict {
+            body["response_format"] = json!({
+                "type": "json_schema",
+                "json_schema": { "name": schema_name, "strict": true, "schema": schema },
+            });
+        } else {
+            body["response_format"] = json!({ "type": "json_object" });
+            body["max_tokens"] = json!(JSON_MODE_MAX_TOKENS);
+        }
+
+        match request(s, &key, &body).await? {
+            None => {
+                last_error = "model returned no content".into();
+                messages.push(json!({ "role": "user", "content": "Your reply was empty. Reply with the JSON object." }));
+            }
+            Some(text) => match serde_json::from_str::<T>(unfence(&text)) {
+                Ok(v) => return Ok(v),
+                Err(e) => {
+                    last_error = format!("could not parse model reply: {e}");
+                    messages.push(json!({ "role": "assistant", "content": text }));
+                    messages.push(json!({
+                        "role": "user",
+                        "content": format!("That JSON does not match the schema ({e}). Reply again with only the corrected JSON object."),
+                    }));
+                }
+            },
+        }
+    }
+    Err(AppError::Msg(last_error))
 }
 
 // ---------------------------------------------------------------- breakdown
@@ -229,6 +325,7 @@ pub async fn breakdown_quest(
         chat_json(&s, &s.model_name, &system, &user, "quest_breakdown", breakdown_schema()).await?;
     for step in &mut b.steps {
         step.est_minutes = step.est_minutes.clamp(1, 240);
+        step.effort = snap_effort(step.effort);
     }
     Ok(b)
 }
@@ -247,4 +344,30 @@ pub(crate) fn today() -> String {
     rusqlite::Connection::open_in_memory()
         .and_then(|c| c.query_row("SELECT date('now', 'localtime')", [], |r| r.get(0)))
         .unwrap_or_default()
+}
+
+/// Nearest valid effort (1, 2, 3 or 5); JSON-mode models may return others.
+pub(crate) fn snap_effort(effort: i64) -> i64 {
+    match effort {
+        ..=1 => 1,
+        2 => 2,
+        3 => 3,
+        _ => 5,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_mode_replies_are_cleaned_up() {
+        assert_eq!(unfence("```json\n{\"a\":1}\n```"), "{\"a\":1}");
+        assert_eq!(unfence("  {\"a\":1} "), "{\"a\":1}");
+        assert_eq!(snap_effort(0), 1);
+        assert_eq!(snap_effort(4), 5);
+        assert_eq!(snap_effort(3), 3);
+        assert!(supports_json_schema("openai"));
+        assert!(!supports_json_schema("deepseek"));
+    }
 }

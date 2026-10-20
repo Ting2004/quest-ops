@@ -365,3 +365,39 @@
 .danger-controls { flex: 0 0 220px; display: flex; flex-direction: column; gap: 8px; }
 .danger-controls .btn { width: 100%; justify-content: center; white-space: nowrap; }
 .danger-controls .input { width: 100%; }
+
+/* ------------------------------------------------------- model chips */
+.model-chips { display: flex; flex-wrap: wrap; gap: 6px; max-height: 150px; overflow-y: auto; }
+.model-chip {
+  padding: 4px 9px;
+  font-size: 12px;
+  background: var(--panel-raised);
+  border: 1px solid var(--line);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.model-chip:hover { border-color: var(--accent); color: var(--text); }
+.model-chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.model-chip.fast { border-color: var(--info); color: var(--info); }
+.model-chip.on.fast { color: var(--accent-ink); }
+
+/* ------------------------------------------------------------ updates */
+.update-badge {
+  align-self: stretch;
+  margin-bottom: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--accent);
+  background: var(--accent-wash);
+  color: var(--accent-text);
+  font-family: var(--font-head);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  cursor: pointer;
+  animation: fade-in 220ms ease-out both;
+}
+button.update-badge:hover { background: var(--accent); color: var(--accent-ink); }
+.update-notes { margin-top: 14px; padding: 10px 14px; border-left: 2px solid var(--accent); background: var(--panel-raised); }
+.update-notes p { margin: 4px 0 0; white-space: pre-wrap; color: var(--text-muted); }

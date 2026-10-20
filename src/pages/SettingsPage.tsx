@@ -1,9 +1,17 @@
 import { useEffect, useState } from "react";
-import { api, errorMessage, type Settings, type Theme } from "../api";
+import { api, errorMessage, type Provider, type Settings, type Theme } from "../api";
 import DataPanel from "../components/DataPanel";
+import { UpdatePanel } from "../updates";
 import { useT, type Lang, type TKey } from "../i18n";
 
 type Status = { kind: "ok" | "warn" | "err" | "idle"; text: string };
+
+const PROVIDERS: { value: Provider; label: string; baseUrl: string; keyPlaceholder: string; model: string }[] = [
+  { value: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", keyPlaceholder: "sk-…", model: "gpt-…" },
+  { value: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com", keyPlaceholder: "sk-…", model: "deepseek-…" },
+  { value: "custom", label: "Custom", baseUrl: "", keyPlaceholder: "API key", model: "" },
+];
+const DEFAULT_URLS = PROVIDERS.map((p) => p.baseUrl).filter(Boolean);
 
 const LANGUAGES: { value: Lang; label: string }[] = [
   { value: "en", label: "English" },
@@ -24,12 +32,14 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
   const [saveStatus, setSaveStatus] = useState<Status>({ kind: "idle", text: "" });
   const [linkStatus, setLinkStatus] = useState<Status>({ kind: "idle", text: "" });
   const [busy, setBusy] = useState(false);
+  const [available, setAvailable] = useState<string[]>([]);
 
   useEffect(() => {
-    Promise.all([api.getSettings(), api.hasApiKey()])
-      .then(([s, k]) => {
+    api
+      .getSettings()
+      .then(async (s) => {
         setSettings(s);
-        setHasKey(k);
+        setHasKey(await api.hasApiKey(s.provider));
       })
       .catch((e) => setSaveStatus({ kind: "err", text: errorMessage(e) }));
   }, []);
@@ -87,26 +97,52 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
     }
   }
 
+  const provider = PROVIDERS.find((p) => p.value === settings.provider) ?? PROVIDERS[0];
+
+  /** Switches provider in the form; the change is saved with the form (or on Test link). */
+  async function changeProvider(next: Provider) {
+    if (!settings || next === settings.provider) return;
+    const target = PROVIDERS.find((p) => p.value === next)!;
+    const keepUrl = settings.apiBaseUrl && !DEFAULT_URLS.includes(settings.apiBaseUrl);
+    setSettings({ ...settings, provider: next, apiBaseUrl: keepUrl ? settings.apiBaseUrl : target.baseUrl });
+    setSaveStatus({ kind: "warn", text: t("set.unsaved") });
+    setAvailable([]);
+    setLinkStatus({ kind: "idle", text: "" });
+    try {
+      setHasKey(await api.hasApiKey(next));
+    } catch (e) {
+      setLinkStatus({ kind: "err", text: errorMessage(e) });
+    }
+  }
+
   const storeKey = () =>
     withBusy(async () => {
-      await api.setApiKey(keyDraft);
+      await api.setApiKey(settings.provider, keyDraft);
       setKeyDraft("");
-      setHasKey(await api.hasApiKey());
+      setHasKey(await api.hasApiKey(settings.provider));
       setLinkStatus({ kind: "idle", text: t("set.keyUpdated") });
     });
 
   const removeKey = () =>
     withBusy(async () => {
-      await api.clearApiKey();
+      await api.clearApiKey(settings.provider);
       setHasKey(false);
       setLinkStatus({ kind: "idle", text: t("set.keyRemoved") });
     });
 
+  // Tests what is on screen: unsaved provider, URL or model edits are saved first.
   const testLink = () =>
     withBusy(async () => {
+      if (saveStatus.kind === "warn") {
+        const saved = await api.saveSettings(settings);
+        setSettings(saved);
+        onSaved(saved);
+        setSaveStatus({ kind: "ok", text: t("set.saved") });
+      }
       setLinkStatus({ kind: "warn", text: t("set.linking") });
       const r = await api.testLlmConnection();
       setLinkStatus({ kind: r.ok ? "ok" : "err", text: r.message });
+      setAvailable(r.available);
     });
 
   const days = settings.urgentWithinDays;
@@ -117,18 +153,38 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
         <section className="panel">
           <div className="panel-head">
             <h2 className="h-display" style={{ fontSize: 24 }}>{t("set.uplink")}</h2>
-            <span className="label">LLM-01 / OpenAI</span>
+            <span className="label">LLM-01 / {provider.label}</span>
           </div>
 
           <div className="field">
-            <label className="label" htmlFor="api-key">{t("set.apiKey")}</label>
+            <span className="label">{t("set.provider")}</span>
+            <div className="segmented" role="radiogroup" aria-label={t("set.provider")}>
+              {PROVIDERS.map((p) => (
+                <button
+                  key={p.value}
+                  role="radio"
+                  aria-checked={settings.provider === p.value}
+                  className={settings.provider === p.value ? "on" : ""}
+                  onClick={() => changeProvider(p.value)}
+                >
+                  {p.value === "custom" ? t("set.providerCustom") : p.label}
+                </button>
+              ))}
+            </div>
+            <span className="field-hint">{t(`set.providerHint.${settings.provider}` as TKey)}</span>
+          </div>
+
+          <div className="field">
+            <label className="label" htmlFor="api-key">
+              {t("set.apiKeyFor", { provider: provider.value === "custom" ? t("set.providerCustom") : provider.label })}
+            </label>
             <div className="row" style={{ flexWrap: "nowrap" }}>
               <input
                 id="api-key"
                 className="input"
                 type="password"
                 autoComplete="off"
-                placeholder={hasKey ? t("set.apiKeyStored") : "sk-…"}
+                placeholder={hasKey ? t("set.apiKeyStored") : provider.keyPlaceholder}
                 value={keyDraft}
                 onChange={(e) => setKeyDraft(e.target.value)}
               />
@@ -144,7 +200,7 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
             <input
               id="model"
               className="input"
-              placeholder={t("set.modelPlaceholder")}
+              placeholder={provider.model || t("set.modelPlaceholder")}
               value={settings.modelName}
               onChange={(e) => update("modelName", e.target.value)}
             />
@@ -168,10 +224,30 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
             <input
               id="base-url"
               className="input"
+              placeholder="https://…/v1"
               value={settings.apiBaseUrl}
               onChange={(e) => update("apiBaseUrl", e.target.value)}
             />
           </div>
+
+          {available.length > 0 && (
+            <div className="field">
+              <span className="label">{t("set.available")}</span>
+              <div className="model-chips">
+                {available.map((m) => (
+                  <button
+                    key={m}
+                    className={`model-chip mono ${m === settings.modelName ? "on" : ""} ${m === settings.smallModelName ? "fast" : ""}`}
+                    title={t("set.availableHint")}
+                    onClick={(e) => update(e.altKey ? "smallModelName" : "modelName", m)}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+              <span className="field-hint">{t("set.availableHint")}</span>
+            </div>
+          )}
 
           <div className="row" style={{ marginTop: 20, justifyContent: "space-between" }}>
             <span className={`status ${hasKey ? linkStatus.kind : "idle"}`}>
@@ -185,7 +261,7 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
               )}
               <button
                 className="btn"
-                disabled={busy || !hasKey || !settings.modelName.trim()}
+                disabled={busy || !hasKey || !settings.apiBaseUrl.trim()}
                 onClick={testLink}
                 title={t("set.testLinkTitle")}
               >
@@ -332,6 +408,7 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
         </button>
       </div>
 
+      <UpdatePanel />
       <DataPanel />
     </div>
   );

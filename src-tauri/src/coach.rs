@@ -92,7 +92,7 @@ fn to_draft(b: &BreakdownStep) -> StepDraft {
     StepDraft {
         title: b.title.trim().to_string(),
         done_when: b.done_when.trim().to_string(),
-        effort: b.effort,
+        effort: llm::snap_effort(b.effort),
         est_minutes: b.est_minutes.clamp(1, 240),
     }
 }

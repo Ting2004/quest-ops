@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Lang } from "./i18n";
 
 export type Theme = "dark" | "light" | "system";
+export type Provider = "openai" | "deepseek" | "custom";
 
 export interface Settings {
   commanderName: string;
@@ -16,12 +17,15 @@ export interface Settings {
   importanceThreshold: number;
   language: Lang;
   theme: Theme;
+  provider: Provider;
 }
 
 export interface ConnectionCheck {
   ok: boolean;
   model: string;
   message: string;
+  /** Model IDs the key can use. */
+  available: string[];
 }
 
 export interface Category {
@@ -226,9 +230,9 @@ export const api = {
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
   setLanguage: (language: Lang) => invoke<Settings>("set_language", { language }),
   setTheme: (theme: Theme) => invoke<Settings>("set_theme", { theme }),
-  setApiKey: (key: string) => invoke<void>("set_api_key", { key }),
-  clearApiKey: () => invoke<void>("clear_api_key"),
-  hasApiKey: () => invoke<boolean>("has_api_key"),
+  setApiKey: (provider: Provider, key: string) => invoke<void>("set_api_key", { provider, key }),
+  clearApiKey: (provider: Provider) => invoke<void>("clear_api_key", { provider }),
+  hasApiKey: (provider: Provider) => invoke<boolean>("has_api_key", { provider }),
   testLlmConnection: () => invoke<ConnectionCheck>("test_llm_connection"),
 
   listCategories: () => invoke<Category[]>("list_categories"),

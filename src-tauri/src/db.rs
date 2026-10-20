@@ -161,6 +161,11 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     ALTER TABLE profile ADD COLUMN theme TEXT NOT NULL DEFAULT 'dark'
         CHECK (theme IN ('dark', 'light', 'system'));
     "#,
+    // v7: LLM provider (OpenAI-compatible APIs such as DeepSeek)
+    r#"
+    ALTER TABLE profile ADD COLUMN provider TEXT NOT NULL DEFAULT 'openai'
+        CHECK (provider IN ('openai', 'deepseek', 'custom'));
+    "#,
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {

@@ -9,6 +9,7 @@ import SettingsPage from "./pages/SettingsPage";
 import StatsPage from "./pages/StatsPage";
 import TodayPage from "./pages/TodayPage";
 import { AppProvider, useApp } from "./store";
+import { UpdateBadge, UpdateProvider } from "./updates";
 
 type PageId = "today" | "matrix" | "inbox" | "stats" | "settings";
 
@@ -41,7 +42,9 @@ export default function App() {
   return (
     <I18nProvider lang={lang}>
       <AppProvider settings={settings} setSettings={setSettings}>
-        <Shell />
+        <UpdateProvider>
+          <Shell />
+        </UpdateProvider>
       </AppProvider>
     </I18nProvider>
   );
@@ -84,6 +87,7 @@ function Shell() {
         </nav>
 
         <div className="sidebar-foot">
+          <UpdateBadge />
           <span className="label">{t("side.commander")}</span>
           <span className="h-display" style={{ fontSize: 20 }}>{settings?.commanderName ?? "—"}</span>
           {stats && (

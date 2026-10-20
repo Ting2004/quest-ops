@@ -1,7 +1,8 @@
 # Quest Ops
 
 A desktop app that turns large to-do items into short, timed objectives and
-rewards finishing them. An OpenAI model breaks tasks down, scores their
+rewards finishing them. An LLM (OpenAI, DeepSeek, or any OpenAI-compatible
+API) breaks tasks down, scores their
 priority on an Eisenhower matrix, plans the day and helps when you are stuck.
 
 Built with Tauri 2 (Rust + SQLite backend) and React + TypeScript. Interface
@@ -36,4 +37,4 @@ npm run tauri build -- --no-bundle     # release exe in src-tauri/target/release
 ## Data and secrets
 
 - Database: `%APPDATA%\com.motivation.questops\questops.db`
-- The OpenAI API key is stored in Windows Credential Manager, never in files.
+- API keys (one per provider) are stored in Windows Credential Manager, never in files.

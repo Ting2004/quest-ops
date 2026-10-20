@@ -24,12 +24,14 @@ pub struct Settings {
     /// Colour theme: "dark", "light" or "system". Changed only through `set_theme`.
     #[serde(default)]
     pub theme: String,
+    /// LLM provider: "openai", "deepseek" or "custom" (any OpenAI-compatible API).
+    pub provider: String,
 }
 
 pub fn load(conn: &rusqlite::Connection) -> AppResult<Settings> {
     Ok(conn.query_row(
         "SELECT commander_name, goals_text, model_name, small_model_name, api_base_url,
-                max_pauses, urgent_within_days, importance_threshold, language, theme
+                max_pauses, urgent_within_days, importance_threshold, language, theme, provider
          FROM profile WHERE id = 1",
         [],
         |r| {
@@ -44,6 +46,7 @@ pub fn load(conn: &rusqlite::Connection) -> AppResult<Settings> {
                 importance_threshold: r.get(7)?,
                 language: r.get(8)?,
                 theme: r.get(9)?,
+                provider: r.get(10)?,
             })
         },
     )?)
@@ -69,11 +72,18 @@ pub fn save_settings(db: State<'_, Db>, settings: Settings) -> AppResult<Setting
     if !["en", "zh"].contains(&settings.language.as_str()) {
         return Err(AppError::Msg("language must be en or zh".into()));
     }
+    if !crate::secrets::PROVIDERS.contains(&settings.provider.as_str()) {
+        return Err(AppError::Msg("unknown provider".into()));
+    }
+    if settings.api_base_url.trim().is_empty() {
+        return Err(AppError::Msg("API base URL is required".into()));
+    }
     let conn = db.0.lock().map_err(|_| AppError::Msg("database lock poisoned".into()))?;
     conn.execute(
         "UPDATE profile SET commander_name = ?1, goals_text = ?2, model_name = ?3,
                 small_model_name = ?4, api_base_url = ?5, max_pauses = ?6,
-                urgent_within_days = ?7, importance_threshold = ?8, language = ?9
+                urgent_within_days = ?7, importance_threshold = ?8, language = ?9,
+                provider = ?10
          WHERE id = 1",
         rusqlite::params![
             settings.commander_name.trim(),
@@ -85,6 +95,7 @@ pub fn save_settings(db: State<'_, Db>, settings: Settings) -> AppResult<Setting
             settings.urgent_within_days,
             settings.importance_threshold,
             settings.language,
+            settings.provider,
         ],
     )?;
     load(&conn)

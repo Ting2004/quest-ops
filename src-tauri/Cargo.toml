@@ -1,6 +1,6 @@
 [package]
 name = "quest-ops"
-version = "0.1.0"
+version = "0.1.1"
 description = "Quest Ops: task breakdown and motivation"
 authors = ["tch4"]
 edition = "2024"
@@ -29,6 +29,8 @@ keyring = { version = "3", features = ["windows-native"] }
 tauri-plugin-notification = "2.7.0"
 tokio = { version = "1.54.0", features = ["time"] }
 tauri-plugin-dialog = "2.8.3"
+tauri-plugin-updater = "2.14.0"
+tauri-plugin-process = "2.4.0"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
