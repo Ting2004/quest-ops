@@ -1,10 +1,10 @@
-// In-app updates through the Tauri updater (Gitee first for users in China,
-// then GitHub; see plugins.updater.endpoints): a quiet check shortly after
-// launch, a manual check from Config, and one-click download and install.
-// Installing always needs the person's click.
+// In-app updates. The backend checks every mirror (Gitee and GitHub) at once
+// and offers the newest version found (see src-tauri/src/updater.rs): a quiet
+// check shortly after launch, a manual check from Config, and one-click
+// download and install. Installing always needs the person's click.
 import { getVersion } from "@tauri-apps/api/app";
-import { relaunch } from "@tauri-apps/plugin-process";
-import { check, type Update } from "@tauri-apps/plugin-updater";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { errorMessage } from "./api";
 import { useT } from "./i18n";
@@ -12,8 +12,14 @@ import { useApp } from "./store";
 
 /** Delay before the startup check, so it never slows down opening the app. */
 const STARTUP_CHECK_MS = 4000;
-/** Per-check timeout, so an unreachable mirror falls through to the next one quickly. */
-const CHECK_TIMEOUT_MS = 20000;
+
+interface Update {
+  version: string;
+  currentVersion: string;
+  notes: string | null;
+  /** Host of the mirror it downloads from, e.g. gitee.com. */
+  source: string;
+}
 
 export type UpdateStatus =
   | { kind: "idle" }
@@ -56,7 +62,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     async (quiet: boolean) => {
       if (!quiet) setStatus({ kind: "checking" });
       try {
-        const found = await check({ timeout: CHECK_TIMEOUT_MS });
+        const found = await invoke<Update | null>("check_update");
         setUpdate(found);
         setStatus({ kind: found ? "available" : "current" });
         if (found && announced.current !== found.version) {
@@ -78,22 +84,19 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
 
   const install = useCallback(async () => {
     if (!update) return;
-    let total = 0;
-    let received = 0;
     setStatus({ kind: "downloading", pct: null });
+    const unlisten = await listen<{ received: number; total: number | null }>("update-progress", (e) => {
+      const { received, total } = e.payload;
+      if (total && received >= total) setStatus({ kind: "installing" });
+      else setStatus({ kind: "downloading", pct: total ? Math.round((received / total) * 100) : null });
+    });
     try {
-      await update.downloadAndInstall((event) => {
-        if (event.event === "Started") total = event.data.contentLength ?? 0;
-        if (event.event === "Progress") {
-          received += event.data.chunkLength;
-          setStatus({ kind: "downloading", pct: total ? Math.round((received / total) * 100) : null });
-        }
-        if (event.event === "Finished") setStatus({ kind: "installing" });
-      });
-      // On Windows the installer usually closes the app itself; relaunch covers the rest.
-      await relaunch();
+      // Downloads, installs and restarts; on Windows the installer closes the app.
+      await invoke("install_update");
     } catch (e) {
       setStatus({ kind: "error", message: errorMessage(e) });
+    } finally {
+      unlisten();
     }
   }, [update]);
 
@@ -115,7 +118,8 @@ export function UpdatePanel() {
   let line: { kind: "ok" | "warn" | "err" | "idle"; text: string } | null = null;
   if (status.kind === "checking") line = { kind: "warn", text: t("upd.checking") };
   if (status.kind === "current") line = { kind: "ok", text: t("upd.upToDate") };
-  if (status.kind === "available" && update) line = { kind: "warn", text: t("upd.available", { v: update.version }) };
+  if (status.kind === "available" && update)
+    line = { kind: "warn", text: t("upd.available", { v: update.version, source: update.source }) };
   if (status.kind === "downloading")
     line = { kind: "warn", text: t("upd.downloading", { pct: status.pct ?? "…" }) };
   if (status.kind === "installing") line = { kind: "warn", text: t("upd.installing") };
@@ -140,10 +144,10 @@ export function UpdatePanel() {
         )}
         {line && <span className={`status ${line.kind}`}>{line.text}</span>}
       </div>
-      {update?.body && (
+      {update?.notes && (
         <div className="update-notes">
           <span className="label">{t("upd.notes")}</span>
-          <p>{update.body}</p>
+          <p>{update.notes}</p>
         </div>
       )}
     </section>

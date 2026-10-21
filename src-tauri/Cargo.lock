@@ -3018,11 +3018,12 @@ dependencies = [
 
 [[package]]
 name = "quest-ops"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "keyring",
  "reqwest",
  "rusqlite",
+ "semver",
  "serde",
  "serde_json",
  "tauri",

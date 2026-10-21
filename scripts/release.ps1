@@ -102,23 +102,21 @@ if (-not $GiteeOnly) {
     Remove-Item -Recurse -Force $stage
 
     Write-Utf8NoBom "$share\latest.json" (New-Manifest "https://github.com/$repo/releases/download/$tag/$setupName" $signature)
-
-    Write-Host "== Publishing $tag to GitHub ($repo)" -ForegroundColor Yellow
-    if ((Invoke-Native { git push origin HEAD } | Select-Object -Last 1) -ne 0) { throw "git push to GitHub failed." }
-    $releaseNotes = if ($Notes) { $Notes } else { "Quest Ops $version" }
-    $assets = @("$share\$setupName", "$share\$portableName", "$share\latest.json")
-    $commit = git rev-parse HEAD
-    $created = Invoke-Native {
-        gh release create $tag @assets --repo $repo --title "Quest Ops $version" --notes $releaseNotes --target $commit
-    } | Select-Object -Last 1
-    if ($created -ne 0) { throw "gh release create failed." }
 }
+
+# Code and tag go to both mirrors first. Gitee is published before GitHub
+# because its uploads are slow; GitHub's release (which flips its "latest")
+# follows, so the two go live close together. Apps compare both anyway.
+if ((Invoke-Native { git fetch origin --tags } | Select-Object -Last 1) -ne 0) { throw "git fetch from GitHub failed." }
+git rev-parse -q --verify "refs/tags/$tag" *> $null
+if ($LASTEXITCODE -ne 0) { git tag $tag; if ($LASTEXITCODE -ne 0) { throw "creating tag $tag failed." } }
+if (-not $GiteeOnly) {
+    if ((Invoke-Native { git push origin HEAD $tag } | Select-Object -Last 1) -ne 0) { throw "git push to GitHub failed." }
+}
+if ((Invoke-Native { git push gitee HEAD:main $tag } | Select-Object -Last 1) -ne 0) { throw "git push to Gitee failed." }
 
 # ------------------------------------------------------------------ Gitee
 Write-Host "== Publishing $tag to Gitee ($giteeRepo)" -ForegroundColor Yellow
-if ((Invoke-Native { git fetch origin --tags } | Select-Object -Last 1) -ne 0) { throw "git fetch from GitHub failed." }
-if ((Invoke-Native { git push gitee HEAD:main } | Select-Object -Last 1) -ne 0) { throw "git push to Gitee failed." }
-if ((Invoke-Native { git push gitee $tag } | Select-Object -Last 1) -ne 0) { throw "pushing tag $tag to Gitee failed." }
 
 $api = "https://gitee.com/api/v5/repos/$giteeRepo/releases"
 $releaseNotes = if ($Notes) { $Notes } else { "Quest Ops $version" }
@@ -184,6 +182,16 @@ Remove-Item $giteeManifest
 $live = curl.exe -sL "https://gitee.com/$giteeRepo/raw/updates/latest.json" | ConvertFrom-Json
 if ($live.version -ne $version) { throw "Gitee manifest check failed: expected $version, got '$($live.version)'" }
 Write-Host "   Gitee manifest live: version $($live.version)"
+
+# ----------------------------------------------------------------- GitHub
+if (-not $GiteeOnly) {
+    Write-Host "== Publishing $tag to GitHub ($repo)" -ForegroundColor Yellow
+    $assets = @("$share\$setupName", "$share\$portableName", "$share\latest.json")
+    $created = Invoke-Native {
+        gh release create $tag @assets --repo $repo --title "Quest Ops $version" --notes $releaseNotes --verify-tag
+    } | Select-Object -Last 1
+    if ($created -ne 0) { throw "gh release create failed." }
+}
 
 Write-Host "== Done" -ForegroundColor Green
 if (-not $GiteeOnly) { Write-Host "   GitHub: https://github.com/$repo/releases/tag/$tag" }

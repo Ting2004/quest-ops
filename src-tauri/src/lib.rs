@@ -10,6 +10,7 @@ mod secrets;
 mod settings;
 mod timer;
 mod today;
+mod updater;
 
 use std::sync::Mutex;
 
@@ -75,6 +76,7 @@ pub fn run() {
             let language = settings::load(&conn).map(|s| s.language).unwrap_or_default();
             app.manage(db::Db(Mutex::new(conn)));
             app.manage(priority::ScoreQueue::default());
+            app.manage(updater::PendingUpdate::default());
 
             build_tray(app, &language)?;
             timer::spawn_ticker(app.handle().clone());
@@ -122,6 +124,8 @@ pub fn run() {
             today::plan_today,
             today::debrief_today,
             rewards::get_stats,
+            updater::check_update,
+            updater::install_update,
             data::export_tasks,
             data::import_tasks,
             data::clear_finished,
