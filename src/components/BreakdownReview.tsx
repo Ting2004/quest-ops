@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, errorMessage, type Breakdown, type Effort, type Quest, type Step, type StepDraft } from "../api";
+import { api, errorMessage, type Breakdown, type Category, type Effort, type Quest, type Step, type StepDraft } from "../api";
 import { useT, type TKey } from "../i18n";
 
 const EFFORTS: Effort[] = [1, 2, 3, 5];
@@ -13,7 +13,13 @@ interface Props {
   /** Set when reviewing several breakdowns in a row. */
   position?: { index: number; total: number; onDeployRest: (title: string, steps: StepDraft[]) => void };
   /** Set when re-planning an operation that is already deployed. */
-  edit?: { importance: number | null; done: Step[]; runningId: number | null };
+  edit?: {
+    importance: number | null;
+    done: Step[];
+    runningId: number | null;
+    categories: Category[];
+    onMoveToInbox: () => void;
+  };
 }
 
 /** Edit an AI breakdown before committing it, answer its clarifying questions,
@@ -25,6 +31,9 @@ export default function BreakdownReview({ quest, initial, onDeployed, onCancel, 
   const [questions, setQuestions] = useState(initial.clarifyingQuestions);
   const [answers, setAnswers] = useState<string[]>(initial.clarifyingQuestions.map(() => ""));
   const [importance, setImportance] = useState<number | null>(edit?.importance ?? null);
+  const [deadline, setDeadline] = useState(quest.deadline ?? "");
+  const [notes, setNotes] = useState(quest.notes);
+  const [categoryId, setCategoryId] = useState(quest.categoryId === null ? "" : String(quest.categoryId));
   const [busy, setBusy] = useState<"" | "regen" | "deploy">("");
   const [error, setError] = useState("");
 
@@ -64,7 +73,11 @@ export default function BreakdownReview({ quest, initial, onDeployed, onCancel, 
     try {
       onDeployed(
         edit
-          ? await api.updateQuestPlan(quest.id, title, importance, steps)
+          ? await api.updateQuestPlan(
+              quest.id,
+              { title, notes, categoryId: categoryId ? Number(categoryId) : null, deadline: deadline || null, importance },
+              steps,
+            )
           : await api.deployQuest(quest.id, title, steps),
       );
     } catch (e) {
@@ -94,6 +107,57 @@ export default function BreakdownReview({ quest, initial, onDeployed, onCancel, 
         <label className="label" htmlFor="op-title">{t("br.name")}</label>
         <input id="op-title" className="input" value={title} onChange={(e) => setTitle(e.target.value)} />
       </div>
+
+      {edit && (
+        <>
+          <div className="row" style={{ marginTop: 16, alignItems: "flex-end" }}>
+            <div className="field" style={{ marginTop: 0 }}>
+              <label className="label" htmlFor="op-deadline">{t("in.deadline")}</label>
+              <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+                <input
+                  id="op-deadline"
+                  className="input"
+                  type="date"
+                  style={{ width: 170 }}
+                  value={deadline}
+                  onChange={(e) => setDeadline(e.target.value)}
+                />
+                {deadline && (
+                  <button className="icon-btn" onClick={() => setDeadline("")} aria-label={t("br.clearDeadline")} title={t("br.clearDeadline")}>
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="field" style={{ marginTop: 0 }}>
+              <label className="label" htmlFor="op-cat">{t("in.category")}</label>
+              <select
+                id="op-cat"
+                className="input"
+                style={{ width: 170 }}
+                value={categoryId}
+                onChange={(e) => setCategoryId(e.target.value)}
+              >
+                <option value="">{t("in.none")}</option>
+                {edit.categories.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="field">
+            <label className="label" htmlFor="op-notes">{t("in.notes")}</label>
+            <textarea
+              id="op-notes"
+              className="input"
+              rows={2}
+              style={{ minHeight: 56 }}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </div>
+        </>
+      )}
 
       {edit && (
         <div className="field">
@@ -225,9 +289,16 @@ export default function BreakdownReview({ quest, initial, onDeployed, onCancel, 
       <div className="hazard" style={{ margin: "20px 0 16px" }} />
 
       <div className="row" style={{ justifyContent: "space-between" }}>
-        <button className="btn btn-ghost" disabled={!!busy} onClick={onCancel}>
-          {position ? t("br.skip") : t("br.back")}
-        </button>
+        <div className="row">
+          <button className="btn btn-ghost" disabled={!!busy} onClick={onCancel}>
+            {position ? t("br.skip") : t("br.back")}
+          </button>
+          {edit && (
+            <button className="btn btn-ghost" disabled={!!busy} onClick={edit.onMoveToInbox}>
+              ↩ {t("in.moveToInbox")}
+            </button>
+          )}
+        </div>
         <div className="row">
           {position && position.index < position.total - 1 && (
             <button

@@ -259,18 +259,41 @@ pub fn get_quest_plan(db: State<'_, Db>, quest_id: i64) -> AppResult<QuestPlan> 
     Ok(QuestPlan { quest: load_quest(&conn, quest_id)?, importance, steps: steps_for(&conn, quest_id)? })
 }
 
-/// Rewrites a deployed operation's open objectives: updates edited ones,
-/// adds new ones, deletes removed ones, and re-orders them after the finished
-/// objectives, which are left untouched. Setting `importance` records the
-/// person's own rating, which background AI scoring then leaves alone.
+/// Operation-level fields edited on the planning screen.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanDetails {
+    pub title: String,
+    #[serde(default)]
+    pub notes: String,
+    pub category_id: Option<i64>,
+    /// YYYY-MM-DD, or empty/None for no deadline.
+    pub deadline: Option<String>,
+    pub importance: Option<i64>,
+}
+
+fn valid_date(d: &str) -> bool {
+    let b = d.as_bytes();
+    b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b.iter().enumerate().all(|(i, c)| i == 4 || i == 7 || c.is_ascii_digit())
+}
+
+/// Rewrites a deployed operation: its details (name, notes, category,
+/// deadline, importance) and its open objectives. Edited objectives are
+/// updated, new ones added, removed ones deleted, and all re-ordered after the
+/// finished objectives, which are left untouched. Setting `importance` records
+/// the person's own rating, which background AI scoring then leaves alone.
 pub fn update_plan_in(
     conn: &mut Connection,
     quest_id: i64,
-    title: &str,
-    importance: Option<i64>,
+    details: &PlanDetails,
     steps: &[StepEdit],
 ) -> AppResult<()> {
-    let title = title.trim();
+    let title = details.title.trim();
+    let importance = details.importance;
+    let deadline = clean_deadline(details.deadline.clone());
     if title.is_empty() {
         return Err(AppError::Msg("operation title is required".into()));
     }
@@ -279,6 +302,9 @@ pub fn update_plan_in(
     }
     if importance.is_some_and(|i| !(1..=5).contains(&i)) {
         return Err(AppError::Msg("importance must be 1 to 5".into()));
+    }
+    if deadline.as_deref().is_some_and(|d| !valid_date(d)) {
+        return Err(AppError::Msg("deadline must be a date (YYYY-MM-DD)".into()));
     }
     for (i, s) in steps.iter().enumerate() {
         let draft = StepDraft {
@@ -334,7 +360,10 @@ pub fn update_plan_in(
         };
     }
 
-    tx.execute("UPDATE quest SET title = ?1 WHERE id = ?2", params![title, quest_id])?;
+    tx.execute(
+        "UPDATE quest SET title = ?1, notes = ?2, category_id = ?3, deadline = ?4 WHERE id = ?5",
+        params![title, details.notes.trim(), details.category_id, deadline, quest_id],
+    )?;
     if let Some(i) = importance {
         // A manual rating counts as scored; urgency defaults to "no pressure"
         // beyond the deadline if the AI never scored it.
@@ -353,12 +382,43 @@ pub fn update_plan_in(
 pub fn update_quest_plan(
     db: State<'_, Db>,
     quest_id: i64,
-    title: String,
-    importance: Option<i64>,
+    details: PlanDetails,
     steps: Vec<StepEdit>,
 ) -> AppResult<Quest> {
     let mut conn = lock(&db)?;
-    update_plan_in(&mut conn, quest_id, &title, importance, &steps)?;
+    update_plan_in(&mut conn, quest_id, &details, &steps)?;
+    load_quest(&conn, quest_id)
+}
+
+/// Sends a deployed operation back to the inbox, keeping its objectives so it
+/// can be re-planned and redeployed. A run in progress on it is ended without
+/// XP, and its objectives leave today's plan.
+pub fn move_to_inbox_in(conn: &mut Connection, quest_id: i64) -> AppResult<()> {
+    let status: String = conn
+        .query_row("SELECT status FROM quest WHERE id = ?1", [quest_id], |r| r.get(0))
+        .optional()?
+        .ok_or_else(|| AppError::Msg(format!("operation {quest_id} not found")))?;
+    if status != "active" {
+        return Err(AppError::Msg("only deployed operations can move back to the inbox".into()));
+    }
+    if crate::timer::active(conn)?.is_some_and(|t| t.quest_id == quest_id) {
+        crate::timer::abort_active(conn)?;
+    }
+    let tx = conn.transaction()?;
+    tx.execute(
+        "DELETE FROM daily_plan WHERE step_id IN (SELECT id FROM step WHERE quest_id = ?1)",
+        [quest_id],
+    )?;
+    tx.execute("UPDATE step SET status = 'pending' WHERE quest_id = ?1 AND status = 'active'", [quest_id])?;
+    tx.execute("UPDATE quest SET status = 'inbox' WHERE id = ?1", [quest_id])?;
+    tx.commit()?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn move_to_inbox(db: State<'_, Db>, quest_id: i64) -> AppResult<Quest> {
+    let mut conn = lock(&db)?;
+    move_to_inbox_in(&mut conn, quest_id)?;
     load_quest(&conn, quest_id)
 }
 
@@ -381,6 +441,10 @@ mod tests {
         conn
     }
 
+    fn details(title: &str) -> PlanDetails {
+        PlanDetails { title: title.into(), notes: String::new(), category_id: None, deadline: None, importance: None }
+    }
+
     fn edit(id: Option<i64>, title: &str, est: i64) -> StepEdit {
         StepEdit { id, title: title.into(), done_when: String::new(), effort: 2, est_minutes: est }
     }
@@ -399,7 +463,14 @@ mod tests {
         let mut conn = seeded();
         let steps =
             [edit(Some(4), "Running", 10), edit(None, "Brand new", 12), edit(Some(2), "Kept, renamed", 25)];
-        update_plan_in(&mut conn, 1, "Op v2", Some(5), &steps).unwrap();
+        let edited = PlanDetails {
+            title: "Op v2".into(),
+            notes: "new notes".into(),
+            category_id: Some(3),
+            deadline: Some("2026-12-24".into()),
+            importance: Some(5),
+        };
+        update_plan_in(&mut conn, 1, &edited, &steps).unwrap();
         assert_eq!(
             titles(&conn),
             [
@@ -415,13 +486,51 @@ mod tests {
             })
             .unwrap();
         assert_eq!((title.as_str(), importance, urgency), ("Op v2", 5, 1));
+        let (notes, deadline, cat): (String, String, i64) = conn
+            .query_row("SELECT notes, deadline, category_id FROM quest WHERE id = 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap();
+        assert_eq!((notes.as_str(), deadline.as_str(), cat), ("new notes", "2026-12-24", 3));
+        let bad = PlanDetails { deadline: Some("next week".into()), ..details("Op") };
+        assert!(update_plan_in(&mut conn, 1, &bad, &steps).is_err(), "deadline must be a date");
     }
 
     #[test]
     fn replanning_refuses_to_drop_the_running_objective() {
         let mut conn = seeded();
-        let err = update_plan_in(&mut conn, 1, "Op", None, &[edit(Some(2), "Keep me", 10)]);
+        let err = update_plan_in(&mut conn, 1, &details("Op"), &[edit(Some(2), "Keep me", 10)]);
         assert!(err.is_err());
         assert_eq!(titles(&conn).len(), 4, "nothing changed");
+    }
+}
+
+#[cfg(test)]
+mod inbox_tests {
+    use super::*;
+
+    #[test]
+    fn moving_back_to_inbox_keeps_objectives_and_stops_its_run() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate_for_test(&mut conn);
+        conn.execute_batch(
+            "INSERT INTO quest (id, title, status) VALUES (1, 'Op', 'active');
+             INSERT INTO step (id, quest_id, title, est_minutes, order_index, status) VALUES
+                 (1, 1, 'Done', 10, 0, 'done'), (2, 1, 'Running', 10, 1, 'active'),
+                 (3, 1, 'Next', 10, 2, 'pending');
+             INSERT INTO timer_session (step_id, started_at, started_ms, planned_seconds)
+                 VALUES (2, datetime('now'), 0, 600);
+             INSERT INTO daily_plan (plan_date, step_id, order_index) VALUES ('2026-10-21', 3, 0);",
+        )
+        .unwrap();
+        move_to_inbox_in(&mut conn, 1).unwrap();
+        let q = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        assert_eq!(q("SELECT COUNT(*) FROM quest WHERE status = 'inbox'"), 1);
+        assert_eq!(q("SELECT COUNT(*) FROM step"), 3, "objectives kept");
+        assert_eq!(q("SELECT COUNT(*) FROM step WHERE status = 'done'"), 1);
+        assert_eq!(q("SELECT COUNT(*) FROM step WHERE status = 'active'"), 0);
+        assert_eq!(q("SELECT COUNT(*) FROM timer_session WHERE ended_at IS NULL"), 0, "run stopped");
+        assert_eq!(q("SELECT COUNT(*) FROM daily_plan"), 0);
+        assert!(move_to_inbox_in(&mut conn, 1).is_err(), "already in the inbox");
     }
 }

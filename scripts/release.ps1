@@ -97,7 +97,12 @@ if (-not $GiteeOnly) {
     Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force $stage | Out-Null
     Copy-Item "$root\src-tauri\target\release\quest-ops.exe" "$stage\Quest Ops.exe"
-    if (Test-Path "$share\README.txt") { Copy-Item "$share\README.txt" "$stage\README.txt" }
+    if (Test-Path "$share\README.txt") {
+        # Keep the version numbers in the shared read-me in step with the release.
+        $readme = [IO.File]::ReadAllText("$share\README.txt") -replace '(?<![\d.])\d+\.\d+\.\d+(?![\d.])', $version
+        Write-Utf8NoBom "$share\README.txt" $readme
+        Copy-Item "$share\README.txt" "$stage\README.txt"
+    }
     Compress-Archive -Path "$stage\*" -DestinationPath "$share\$portableName" -Force
     Remove-Item -Recurse -Force $stage
 

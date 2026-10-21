@@ -9,6 +9,9 @@ const EMPTY_FORM = { title: "", notes: "", categoryId: "", deadline: "" };
 
 type ReviewItem = { quest: Quest; breakdown: Breakdown };
 
+/** Drag payload type for moving a deployed operation back to the inbox. */
+const DRAG_TYPE = "application/x-questops-quest";
+
 export default function InboxPage() {
   const t = useT();
   const { refresh: refreshApp } = useApp();
@@ -25,6 +28,7 @@ export default function InboxPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState<QuestPlan | null>(null);
+  const [dropActive, setDropActive] = useState(false);
 
   const busy = planningId !== null || batch !== null;
 
@@ -173,6 +177,36 @@ export default function InboxPage() {
     }
   }
 
+  /** Sends a deployed operation back to the inbox, keeping its objectives. */
+  async function moveBack(quest: Quest) {
+    if (!confirm(t("in.moveConfirm", { title: quest.title }))) return;
+    setError("");
+    try {
+      await api.moveToInbox(quest.id);
+      setEditing(null);
+      setNotice(t("in.moved", { title: quest.title }));
+      await refresh();
+      await refreshApp();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
+  /** Opens an inbox operation's saved objectives for review and redeploy, without the AI. */
+  async function editSavedPlan(quest: Quest) {
+    setError("");
+    setNotice("");
+    try {
+      const plan = await api.getQuestPlan(quest.id);
+      const steps = plan.steps
+        .filter((s) => s.status !== "done")
+        .map(({ title, doneWhen, effort, estMinutes }) => ({ title, doneWhen, effort, estMinutes }));
+      startQueue([{ quest: plan.quest, breakdown: { questTitle: plan.quest.title, clarifyingQuestions: [], steps } }]);
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
   if (editing) {
     const open = editing.steps.filter((s) => s.status !== "done");
     return (
@@ -188,6 +222,8 @@ export default function InboxPage() {
           importance: editing.importance,
           done: editing.steps.filter((s) => s.status === "done"),
           runningId: open.find((s) => s.status === "active")?.id ?? null,
+          categories,
+          onMoveToInbox: () => moveBack(editing.quest),
         }}
         onCancel={() => setEditing(null)}
         onDeployed={async (q) => {
@@ -302,7 +338,24 @@ export default function InboxPage() {
       </section>
 
       <div className="grid-2">
-        <section className="panel">
+        <section
+          className={`panel ${dropActive ? "drop-target-inbox" : ""}`}
+          onDragOver={(e) => {
+            if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            if (!dropActive) setDropActive(true);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropActive(false);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDropActive(false);
+            const q = active.find((x) => x.id === Number(e.dataTransfer.getData(DRAG_TYPE)));
+            if (q) moveBack(q);
+          }}
+        >
           <div className="panel-head">
             <h2 className="h-display" style={{ fontSize: 22 }}>{t("in.inbox")}</h2>
             <span className="label mono">{t("in.unplanned", { n: inbox.length })}</span>
@@ -349,6 +402,11 @@ export default function InboxPage() {
                     {q.deadline && ` · ${t("common.due", { date: q.deadline })}`}
                   </span>
                 </div>
+                {q.stepCount > 0 && (
+                  <button className="btn btn-ghost" disabled={busy} onClick={() => editSavedPlan(q)} title={t("in.editPlanHint")}>
+                    {t("in.editPlan")}
+                  </button>
+                )}
                 <button className="btn" disabled={busy} onClick={() => plan(q)}>
                   {planningId === q.id ? t("in.planning") : t("in.breakDown")}
                 </button>
@@ -367,7 +425,15 @@ export default function InboxPage() {
           {active.length > 0 && <p className="field-hint" style={{ marginTop: 0 }}>{t("in.clickToEdit")}</p>}
           <ul className="quest-list">
             {active.map((q) => (
-              <li key={q.id} className="quest-row editable">
+              <li
+                key={q.id}
+                className="quest-row editable"
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData(DRAG_TYPE, String(q.id));
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+              >
                 <div
                   className="quest-row-main"
                   role="button"
@@ -381,6 +447,7 @@ export default function InboxPage() {
                     {q.deadline && ` · ${t("common.due", { date: q.deadline })}`}
                   </span>
                 </div>
+                <button className="icon-btn" onClick={() => moveBack(q)} aria-label={t("in.moveToInbox")} title={t("in.moveToInbox")}>↩</button>
                 <button className="icon-btn danger" onClick={() => remove(q)} aria-label={t("common.delete")}>✕</button>
               </li>
             ))}

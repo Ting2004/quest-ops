@@ -66,6 +66,15 @@ export interface StepDraft {
   estMinutes: number;
 }
 
+export interface PlanDetails {
+  title: string;
+  notes: string;
+  categoryId: number | null;
+  /** YYYY-MM-DD, or null for no deadline. */
+  deadline: string | null;
+  importance: number | null;
+}
+
 export interface QuestPlan {
   quest: Quest;
   importance: number | null;
@@ -263,8 +272,9 @@ export const api = {
     invoke<Quest>("deploy_quest", { questId, title, steps }),
   getSteps: (questId: number) => invoke<Step[]>("get_steps", { questId }),
   getQuestPlan: (questId: number) => invoke<QuestPlan>("get_quest_plan", { questId }),
-  updateQuestPlan: (questId: number, title: string, importance: number | null, steps: StepDraft[]) =>
-    invoke<Quest>("update_quest_plan", { questId, title, importance, steps }),
+  updateQuestPlan: (questId: number, details: PlanDetails, steps: StepDraft[]) =>
+    invoke<Quest>("update_quest_plan", { questId, details, steps }),
+  moveToInbox: (questId: number) => invoke<Quest>("move_to_inbox", { questId }),
 
   listMatrix: () => invoke<MatrixQuest[]>("list_matrix"),
   scoreQuest: (questId: number) => invoke<MatrixQuest>("score_quest", { questId }),

@@ -441,3 +441,8 @@ button.update-badge:hover { background: var(--accent); color: var(--accent-ink);
   color: var(--text-dim);
 }
 .objective-index .tag { display: block; margin-top: 6px; font-size: 9px; }
+.quest-row.editable[draggable="true"] { cursor: grab; }
+.drop-target-inbox { border-color: var(--accent); background: var(--accent-wash); outline: 2px dashed var(--accent); outline-offset: -6px; }
+/* Inbox rows with several actions: let the buttons wrap under the title. */
+.quest-row { flex-wrap: wrap; }
+.quest-row .quest-row-main { flex: 1 1 220px; }
