@@ -11,6 +11,14 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
+
+# Runs an external tool and returns its exit code. Windows PowerShell 5.1
+# would otherwise treat any stderr output (progress, "not found") as fatal.
+function Invoke-Native([scriptblock]$Block) {
+    $ErrorActionPreference = 'Continue'
+    & $Block 2>&1 | ForEach-Object { Write-Host "$_" }
+    return $LASTEXITCODE
+}
 Set-Location $root
 
 $version = (Get-Content "$root\src-tauri\tauri.conf.json" -Raw | ConvertFrom-Json).version
@@ -23,14 +31,13 @@ if ($remote -notmatch 'github\.com[:/]([^/]+)/([^/]+?)(\.git)?$') { throw "origi
 $repo = "$($Matches[1])/$($Matches[2])"
 
 if (git status --porcelain) { throw "Commit or stash your changes first; releases are built from committed code." }
-gh release view $tag --repo $repo *> $null
-if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists. Bump the version in tauri.conf.json, package.json and Cargo.toml first." }
+$exists = Invoke-Native { gh release view $tag --repo $repo --json tagName } | Select-Object -Last 1
+if ($exists -eq 0) { throw "Release $tag already exists. Bump the version in tauri.conf.json, package.json and Cargo.toml first." }
 
 Write-Host "== Building Quest Ops $version" -ForegroundColor Yellow
 $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content $keyPath -Raw
 $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
-npm run tauri build
-if ($LASTEXITCODE -ne 0) { throw "Build failed." }
+if ((Invoke-Native { npm run tauri build } | Select-Object -Last 1) -ne 0) { throw "Build failed." }
 
 $nsis = "$root\src-tauri\target\release\bundle\nsis"
 $setup = Get-ChildItem $nsis -Filter "*_${version}_x64-setup.exe" | Select-Object -First 1
@@ -67,11 +74,13 @@ $manifest = [ordered]@{
 [IO.File]::WriteAllText("$share\latest.json", ($manifest | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding $false))
 
 Write-Host "== Publishing $tag to $repo" -ForegroundColor Yellow
-git push origin HEAD
-if ($LASTEXITCODE -ne 0) { throw "git push failed." }
+if ((Invoke-Native { git push origin HEAD } | Select-Object -Last 1) -ne 0) { throw "git push failed." }
 $releaseNotes = if ($Notes) { $Notes } else { "Quest Ops $version" }
 $assets = @("$share\$setupName", "$share\$portableName", "$share\latest.json")
-gh release create $tag @assets --repo $repo --title "Quest Ops $version" --notes $releaseNotes --target (git rev-parse HEAD)
-if ($LASTEXITCODE -ne 0) { throw "gh release create failed." }
+$commit = git rev-parse HEAD
+$created = Invoke-Native {
+    gh release create $tag @assets --repo $repo --title "Quest Ops $version" --notes $releaseNotes --target $commit
+} | Select-Object -Last 1
+if ($created -ne 0) { throw "gh release create failed." }
 
 Write-Host "== Done: https://github.com/$repo/releases/tag/$tag" -ForegroundColor Green
