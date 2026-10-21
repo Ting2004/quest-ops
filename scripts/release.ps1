@@ -135,7 +135,8 @@ if (-not $release -or -not $release.id) {
         '--form-string', "target_commitish=main"
     )
 }
-$attached = @(Invoke-RestMethod "$api/$($release.id)/attach_files?access_token=$giteeToken")
+# ForEach-Object unrolls the list; Windows PowerShell returns a JSON array as one object.
+$attached = @(Invoke-RestMethod "$api/$($release.id)/attach_files?access_token=$giteeToken" | ForEach-Object { $_ })
 $setupUrl = $null
 foreach ($file in @("$share\$setupName", "$share\$portableName")) {
     $name = Split-Path $file -Leaf
@@ -149,7 +150,10 @@ foreach ($file in @("$share\$setupName", "$share\$portableName")) {
     }
     if ($name -eq $setupName) { $setupUrl = $url }
 }
-if (-not $setupUrl) { throw "Gitee did not return a download URL for the installer." }
+if ("$setupUrl" -notmatch "^https://\S+/$([regex]::Escape($setupName))$") { throw "Unexpected Gitee installer URL: '$setupUrl'" }
+# Never publish a manifest whose download does not work anonymously.
+$probe = curl.exe -sL -o NUL -r 0-1023 -w "%{http_code}" $setupUrl
+if ($probe -notin @('200', '206')) { throw "Gitee installer download check failed (HTTP $probe): $setupUrl" }
 
 # The Gitee manifest lives alone on the "updates" branch, so its address
 # (raw/updates/latest.json) never changes. Built with git plumbing and a
