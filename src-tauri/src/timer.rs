@@ -42,7 +42,21 @@ pub struct TimerView {
     pub paused_since_ms: Option<i64>,
     pub pauses_used: i64,
     pub max_pauses: i64,
+    /// The operation's next open objectives, in order (up to `UPCOMING`).
+    pub upcoming: Vec<UpcomingStep>,
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpcomingStep {
+    pub id: i64,
+    pub title: String,
+    pub done_when: String,
+    pub est_minutes: i64,
+}
+
+/// How many upcoming objectives the timer view shows.
+const UPCOMING: i64 = 3;
 
 impl TimerView {
     pub fn elapsed_ms(&self, now: i64) -> i64 {
@@ -56,6 +70,26 @@ impl TimerView {
 }
 
 pub fn active(conn: &Connection) -> AppResult<Option<TimerView>> {
+    let Some(mut view) = running(conn)? else { return Ok(None) };
+    let mut stmt = conn.prepare(
+        "SELECT id, title, done_when, est_minutes FROM step
+         WHERE quest_id = ?1 AND id <> ?2 AND parent_step_id IS NULL AND status = 'pending'
+         ORDER BY order_index LIMIT ?3",
+    )?;
+    view.upcoming = stmt
+        .query_map(params![view.quest_id, view.step_id, UPCOMING], |r| {
+            Ok(UpcomingStep {
+                id: r.get(0)?,
+                title: r.get(1)?,
+                done_when: r.get(2)?,
+                est_minutes: r.get(3)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok(Some(view))
+}
+
+fn running(conn: &Connection) -> AppResult<Option<TimerView>> {
     Ok(conn
         .query_row(
             "SELECT t.id, t.step_id, s.title, s.done_when, s.effort, s.quest_id, q.title,
@@ -84,6 +118,7 @@ pub fn active(conn: &Connection) -> AppResult<Option<TimerView>> {
                     paused_since_ms: r.get(11)?,
                     pauses_used: r.get(12)?,
                     max_pauses: r.get(13)?,
+                    upcoming: Vec::new(),
                 })
             },
         )
@@ -311,5 +346,33 @@ fn notify(app: &AppHandle, t: &TimerView, bit: u8, lang: &str) {
         if let Some(w) = app.get_webview_window("main") {
             let _ = w.request_user_attention(Some(tauri::UserAttentionType::Informational));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn running_timer_lists_the_next_objectives_in_order() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate_for_test(&mut conn);
+        conn.execute_batch(
+            "INSERT INTO quest (id, title, status) VALUES (1, 'Op', 'active');
+             INSERT INTO step (id, quest_id, title, est_minutes, order_index, status) VALUES
+                 (1, 1, 'Done already', 10, 0, 'done'),
+                 (2, 1, 'Running', 10, 1, 'active'),
+                 (3, 1, 'Third', 15, 3, 'pending'),
+                 (4, 1, 'Second', 12, 2, 'pending'),
+                 (5, 1, 'Fourth', 10, 4, 'pending'),
+                 (6, 1, 'Fifth', 10, 5, 'pending');
+             INSERT INTO timer_session (step_id, started_at, started_ms, planned_seconds)
+                 VALUES (2, datetime('now'), 0, 600);",
+        )
+        .unwrap();
+        let t = active(&conn).unwrap().unwrap();
+        let titles: Vec<&str> = t.upcoming.iter().map(|s| s.title.as_str()).collect();
+        assert_eq!(titles, ["Second", "Third", "Fourth"]);
+        assert_eq!(t.upcoming[0].est_minutes, 12);
     }
 }

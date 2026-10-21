@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Settings } from "./api";
 import { MissionComplete, Toasts } from "./components/Rewards";
-import { FocusOverlay, TimerDock } from "./components/Timer";
+import { AfterRunPanel, FocusOverlay, TimerDock } from "./components/Timer";
 import { I18nProvider, useT, type TKey } from "./i18n";
 import InboxPage from "./pages/InboxPage";
 import MatrixPage from "./pages/MatrixPage";
@@ -133,6 +133,7 @@ function Shell() {
       </main>
 
       <FocusOverlay />
+      <AfterRunPanel />
       <MissionComplete />
       <Toasts />
     </div>

@@ -261,6 +261,11 @@ const en = {
   "tm.unstickThinking": "Thinking…",
   "tm.unstickInsert": "Insert and switch to it",
   "tm.alreadyRunning": "Another objective is already running.",
+  "tm.nextUp": "Next up",
+  "tm.runComplete": "Objective complete",
+  "tm.finish": "Finish",
+  "tm.proceed": "Proceed to next objective",
+  "tm.noneQueued": "No more open objectives in this operation right now.",
 
   // rewards
   "xp.objective": "Objective",
@@ -608,6 +613,11 @@ const zh: Dict = {
   "tm.unstickThinking": "思考中…",
   "tm.unstickInsert": "插入并切换到它",
   "tm.alreadyRunning": "已有其他目标正在计时。",
+  "tm.nextUp": "接下来",
+  "tm.runComplete": "目标完成",
+  "tm.finish": "结束",
+  "tm.proceed": "继续下一个目标",
+  "tm.noneQueued": "本作战目前没有其他待完成的目标。",
 
   "xp.objective": "目标",
   "xp.on_time": "准时完成",

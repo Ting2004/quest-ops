@@ -8,6 +8,7 @@ import {
   type Settings,
   type Stats,
   type TimerView,
+  type UpcomingStep,
 } from "./api";
 import { useT, type TKey } from "./i18n";
 import { sound } from "./sound";
@@ -39,9 +40,20 @@ interface AppState {
   setFocusOpen: (open: boolean) => void;
   /** Starts an objective's timed run and opens focus mode. */
   start: (stepId: number) => Promise<boolean>;
-  /** Shows rewards for a completion and refreshes everything. */
-  celebrate: (r: CompletionResult) => Promise<void>;
+  /** Shows rewards for a completion and refreshes everything. Pass `after`
+   *  for a timed run so the person can finish or proceed to the next objective. */
+  celebrate: (r: CompletionResult, after?: AfterRun) => Promise<void>;
+  /** Set after a timed run that left the operation unfinished. */
+  afterRun: AfterRun | null;
+  closeAfterRun: () => void;
   fail: (e: unknown) => void;
+}
+
+export interface AfterRun {
+  completedTitle: string;
+  questTitle: string;
+  xp: number;
+  next: UpcomingStep | null;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -70,6 +82,7 @@ export function AppProvider({
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [mission, setMission] = useState<{ title: string; bonus: number } | null>(null);
   const [focusOpen, setFocusOpen] = useState(false);
+  const [afterRun, setAfterRun] = useState<AfterRun | null>(null);
   const nextId = useRef(1);
 
   const dismissToast = useCallback((id: number) => setToasts((ts) => ts.filter((x) => x.id !== id)), []);
@@ -115,7 +128,7 @@ export function AppProvider({
   );
 
   const celebrate = useCallback(
-    async (r: CompletionResult) => {
+    async (r: CompletionResult, after?: AfterRun) => {
       if (r.critical) sound.critical();
       else sound.complete();
       toast({
@@ -144,6 +157,8 @@ export function AppProvider({
       if (r.questCompleted) {
         setMission({ title: r.questCompleted.title, bonus: r.questCompleted.bonus });
         setTimeout(() => sound.mission(), 250);
+      } else if (after) {
+        setAfterRun({ ...after, xp: r.total });
       }
       setFocusOpen(false);
       await refresh();
@@ -170,6 +185,8 @@ export function AppProvider({
         setFocusOpen,
         start,
         celebrate,
+        afterRun,
+        closeAfterRun: () => setAfterRun(null),
         fail,
       }}
     >

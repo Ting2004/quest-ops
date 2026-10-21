@@ -401,3 +401,29 @@
 button.update-badge:hover { background: var(--accent); color: var(--accent-ink); }
 .update-notes { margin-top: 14px; padding: 10px 14px; border-left: 2px solid var(--accent); background: var(--panel-raised); }
 .update-notes p { margin: 4px 0 0; white-space: pre-wrap; color: var(--text-muted); }
+
+/* --------------------------------------------- next up / after a run */
+.focus-next { width: min(560px, 90%); margin-top: 18px; text-align: left; }
+.focus-next ol { margin: 6px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.focus-next li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text-muted);
+}
+.focus-next li:first-child { border-left: 3px solid var(--accent); color: var(--text); }
+.after-run-title { font-size: 34px; color: var(--accent-text); }
+.after-run-done { margin: 8px 0 16px; font-weight: 700; color: var(--text-muted); }
+.after-run-next {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  background: var(--panel-raised);
+}
+.after-run-next strong { font-size: 18px; }

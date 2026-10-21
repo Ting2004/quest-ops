@@ -58,7 +58,19 @@ function useTimerActions() {
   };
   return {
     busy,
-    complete: () => run(async () => celebrate(await api.completeStep())),
+    complete: () =>
+      run(async () => {
+        // Capture what comes next before the run ends and the timer clears.
+        const after = timer
+          ? {
+              completedTitle: timer.stepTitle,
+              questTitle: timer.questTitle,
+              xp: 0,
+              next: timer.upcoming[0] ?? null,
+            }
+          : undefined;
+        await celebrate(await api.completeStep(), after);
+      }),
     pause: () => run(async () => setTimer(await api.pauseTimer())),
     resume: () => run(async () => setTimer(await api.resumeTimer())),
     extend: (m: number) => run(async () => setTimer(await api.extendTimer(m))),
@@ -199,6 +211,20 @@ export function FocusOverlay() {
             {t("tm.abort")}
           </button>
         </div>
+
+        {timer.upcoming.length > 0 && (
+          <div className="focus-next">
+            <span className="label">{t("tm.nextUp")}</span>
+            <ol>
+              {timer.upcoming.map((s) => (
+                <li key={s.id}>
+                  <span>{s.title}</span>
+                  <span className="label mono">{s.estMinutes} {t("common.min")}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+        )}
       </div>
 
       {showProtocol && (
@@ -313,6 +339,66 @@ function Unstick({ timer, onClose }: { timer: TimerView; onClose: () => void }) 
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** Shown after a timed run when the operation still has work: stop here or
+ *  go straight into the next objective. */
+export function AfterRunPanel() {
+  const t = useT();
+  const { afterRun, closeAfterRun, start, timer } = useApp();
+
+  useEffect(() => {
+    if (!afterRun) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeAfterRun();
+      if (e.key === "Enter" && afterRun.next) proceed();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  if (!afterRun) return null;
+
+  async function proceed() {
+    if (!afterRun?.next) return;
+    const nextId = afterRun.next.id;
+    closeAfterRun();
+    await start(nextId);
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={closeAfterRun}>
+      <div className="modal panel after-run" onClick={(e) => e.stopPropagation()}>
+        <div className="panel-head">
+          <span className="label">{afterRun.questTitle}</span>
+          <span className="label mono" style={{ color: "var(--accent-text)" }}>+{afterRun.xp} XP</span>
+        </div>
+        <h2 className="h-display after-run-title">{t("tm.runComplete")}</h2>
+        <p className="after-run-done">✓ {afterRun.completedTitle}</p>
+
+        {afterRun.next ? (
+          <div className="after-run-next">
+            <span className="label">{t("tm.nextUp")}</span>
+            <strong>{afterRun.next.title}</strong>
+            {afterRun.next.doneWhen && <span className="field-hint">{afterRun.next.doneWhen}</span>}
+            <span className="label mono">{afterRun.next.estMinutes} {t("common.min")}</span>
+          </div>
+        ) : (
+          <p className="field-hint">{t("tm.noneQueued")}</p>
+        )}
+
+        <div className="hazard" style={{ margin: "18px 0 14px" }} />
+        <div className="row" style={{ justifyContent: "flex-end" }}>
+          <button className="btn btn-ghost" onClick={closeAfterRun}>{t("tm.finish")}</button>
+          {afterRun.next && (
+            <button className="btn btn-primary" autoFocus disabled={!!timer} onClick={proceed}>
+              {t("tm.proceed")}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

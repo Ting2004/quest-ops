@@ -122,6 +122,15 @@ export interface TimerView {
   pausedSinceMs: number | null;
   pausesUsed: number;
   maxPauses: number;
+  /** The operation's next open objectives, in order. */
+  upcoming: UpcomingStep[];
+}
+
+export interface UpcomingStep {
+  id: number;
+  title: string;
+  doneWhen: string;
+  estMinutes: number;
 }
 
 export interface StartResult {
