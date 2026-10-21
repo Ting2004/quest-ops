@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { api, errorMessage, type Breakdown, type Effort, type Quest, type StepDraft } from "../api";
+import { api, errorMessage, type Breakdown, type Effort, type Quest, type Step, type StepDraft } from "../api";
 import { useT, type TKey } from "../i18n";
 
 const EFFORTS: Effort[] = [1, 2, 3, 5];
+const IMPORTANCE = [1, 2, 3, 4, 5];
 
 interface Props {
   quest: Quest;
@@ -11,15 +12,19 @@ interface Props {
   onCancel: () => void;
   /** Set when reviewing several breakdowns in a row. */
   position?: { index: number; total: number; onDeployRest: (title: string, steps: StepDraft[]) => void };
+  /** Set when re-planning an operation that is already deployed. */
+  edit?: { importance: number | null; done: Step[]; runningId: number | null };
 }
 
-/** Edit an AI breakdown before committing it, or answer its clarifying questions. */
-export default function BreakdownReview({ quest, initial, onDeployed, onCancel, position }: Props) {
+/** Edit an AI breakdown before committing it, answer its clarifying questions,
+ *  or (with `edit`) re-plan an operation that is already deployed. */
+export default function BreakdownReview({ quest, initial, onDeployed, onCancel, position, edit }: Props) {
   const t = useT();
   const [title, setTitle] = useState(initial.questTitle || quest.title);
   const [steps, setSteps] = useState<StepDraft[]>(initial.steps);
   const [questions, setQuestions] = useState(initial.clarifyingQuestions);
   const [answers, setAnswers] = useState<string[]>(initial.clarifyingQuestions.map(() => ""));
+  const [importance, setImportance] = useState<number | null>(edit?.importance ?? null);
   const [busy, setBusy] = useState<"" | "regen" | "deploy">("");
   const [error, setError] = useState("");
 
@@ -57,7 +62,11 @@ export default function BreakdownReview({ quest, initial, onDeployed, onCancel, 
     setBusy("deploy");
     setError("");
     try {
-      onDeployed(await api.deployQuest(quest.id, title, steps));
+      onDeployed(
+        edit
+          ? await api.updateQuestPlan(quest.id, title, importance, steps)
+          : await api.deployQuest(quest.id, title, steps),
+      );
     } catch (e) {
       setError(errorMessage(e));
       setBusy("");
@@ -68,7 +77,7 @@ export default function BreakdownReview({ quest, initial, onDeployed, onCancel, 
     <section className="panel fade-in">
       <div className="panel-head">
         <h2 className="h-display" style={{ fontSize: 24 }}>
-          {t("br.title")}
+          {edit ? t("br.editTitle") : t("br.title")}
           {position && (
             <span style={{ color: "var(--accent-text)" }}>
               {" "}
@@ -85,6 +94,40 @@ export default function BreakdownReview({ quest, initial, onDeployed, onCancel, 
         <label className="label" htmlFor="op-title">{t("br.name")}</label>
         <input id="op-title" className="input" value={title} onChange={(e) => setTitle(e.target.value)} />
       </div>
+
+      {edit && (
+        <div className="field">
+          <span className="label">{t("br.importance")}</span>
+          <div className="segmented" role="radiogroup" aria-label={t("br.importance")}>
+            {IMPORTANCE.map((n) => (
+              <button
+                key={n}
+                role="radio"
+                aria-checked={importance === n}
+                className={`mono ${importance === n ? "on" : ""}`}
+                onClick={() => setImportance(n)}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+          <span className="field-hint">{t("br.importanceHint")}</span>
+        </div>
+      )}
+
+      {edit && edit.done.length > 0 && (
+        <div className="field">
+          <span className="label">{t("br.completed")}</span>
+          <ul className="done-list">
+            {edit.done.map((s) => (
+              <li key={s.id}>
+                <span>✓ {s.title}</span>
+                <span className="label mono">{s.estMinutes} {t("common.min")}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {asking && (
         <div className="stack" style={{ marginTop: 20, gap: 14 }}>
@@ -106,8 +149,11 @@ export default function BreakdownReview({ quest, initial, onDeployed, onCancel, 
       {!asking && (
         <ol className="objectives">
           {steps.map((s, i) => (
-            <li key={i} className="objective">
-              <span className="objective-index mono">{String(i + 1).padStart(2, "0")}</span>
+            <li key={s.id ?? `new-${i}`} className="objective">
+              <span className="objective-index mono">
+                {String(i + 1 + (edit?.done.length ?? 0)).padStart(2, "0")}
+                {s.id !== undefined && s.id === edit?.runningId && <span className="tag info">{t("tm.running")}</span>}
+              </span>
               <div className="objective-body">
                 <input
                   className="input objective-title"
@@ -150,7 +196,14 @@ export default function BreakdownReview({ quest, initial, onDeployed, onCancel, 
               <div className="objective-tools">
                 <button className="icon-btn" disabled={i === 0} onClick={() => move(i, -1)} aria-label={t("br.up")}>▲</button>
                 <button className="icon-btn" disabled={i === steps.length - 1} onClick={() => move(i, 1)} aria-label={t("br.down")}>▼</button>
-                <button className="icon-btn danger" onClick={() => setSteps(steps.filter((_, j) => j !== i))} aria-label={t("br.remove")}>✕</button>
+                <button
+                  className="icon-btn danger"
+                  disabled={s.id !== undefined && s.id === edit?.runningId}
+                  onClick={() => setSteps(steps.filter((_, j) => j !== i))}
+                  aria-label={t("br.remove")}
+                >
+                  ✕
+                </button>
               </div>
             </li>
           ))}
@@ -191,7 +244,7 @@ export default function BreakdownReview({ quest, initial, onDeployed, onCancel, 
           </button>
           {!asking && (
             <button className="btn btn-primary" disabled={!!busy || steps.length === 0} onClick={deploy}>
-              {busy === "deploy" ? t("br.deploying") : t("br.deploy")}
+              {busy === "deploy" ? t("br.deploying") : edit ? t("br.save") : t("br.deploy")}
             </button>
           )}
         </div>

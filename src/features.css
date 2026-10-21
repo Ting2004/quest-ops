@@ -427,3 +427,17 @@ button.update-badge:hover { background: var(--accent); color: var(--accent-ink);
   background: var(--panel-raised);
 }
 .after-run-next strong { font-size: 18px; }
+
+/* ---------------------------------------------------------- re-planning */
+.quest-row.editable .quest-row-main { cursor: pointer; }
+.quest-row.editable:hover { border-color: var(--accent); }
+.done-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.done-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+}
+.objective-index .tag { display: block; margin-top: 6px; font-size: 9px; }

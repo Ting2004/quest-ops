@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, errorMessage, type Breakdown, type Category, type Quest, type StepDraft } from "../api";
+import { api, errorMessage, type Breakdown, type Category, type Quest, type QuestPlan, type StepDraft } from "../api";
 import BreakdownReview from "../components/BreakdownReview";
 import { useT } from "../i18n";
 import { useApp } from "../store";
@@ -24,6 +24,7 @@ export default function InboxPage() {
   const [deployedCount, setDeployedCount] = useState(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [editing, setEditing] = useState<QuestPlan | null>(null);
 
   const busy = planningId !== null || batch !== null;
 
@@ -159,6 +160,44 @@ export default function InboxPage() {
     } catch (e) {
       setError(errorMessage(e));
     }
+  }
+
+  /** Reopens a deployed operation on the planning screen. */
+  async function openEditor(quest: Quest) {
+    setError("");
+    setNotice("");
+    try {
+      setEditing(await api.getQuestPlan(quest.id));
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
+  if (editing) {
+    const open = editing.steps.filter((s) => s.status !== "done");
+    return (
+      <BreakdownReview
+        key={`edit-${editing.quest.id}`}
+        quest={editing.quest}
+        initial={{
+          questTitle: editing.quest.title,
+          clarifyingQuestions: [],
+          steps: open.map(({ id, title, doneWhen, effort, estMinutes }) => ({ id, title, doneWhen, effort, estMinutes })),
+        }}
+        edit={{
+          importance: editing.importance,
+          done: editing.steps.filter((s) => s.status === "done"),
+          runningId: open.find((s) => s.status === "active")?.id ?? null,
+        }}
+        onCancel={() => setEditing(null)}
+        onDeployed={async (q) => {
+          setEditing(null);
+          setNotice(t("in.saved", { title: q.title }));
+          await refresh();
+          await refreshApp();
+        }}
+      />
+    );
   }
 
   if (queue.length > 0) {
@@ -325,10 +364,17 @@ export default function InboxPage() {
             <span className="label mono">{t("in.active", { n: active.length })}</span>
           </div>
           {active.length === 0 && <p className="empty-note">{t("in.noActive")}</p>}
+          {active.length > 0 && <p className="field-hint" style={{ marginTop: 0 }}>{t("in.clickToEdit")}</p>}
           <ul className="quest-list">
             {active.map((q) => (
-              <li key={q.id} className="quest-row">
-                <div className="quest-row-main">
+              <li key={q.id} className="quest-row editable">
+                <div
+                  className="quest-row-main"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openEditor(q)}
+                  onKeyDown={(e) => e.key === "Enter" && openEditor(q)}
+                >
                   <span className="quest-row-title">{q.title}</span>
                   <span className="label mono">
                     {t("common.objectives", { n: q.stepCount })} · {q.totalMinutes} {t("common.min")}

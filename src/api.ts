@@ -58,10 +58,19 @@ export interface NewQuest {
 export type Effort = 1 | 2 | 3 | 5;
 
 export interface StepDraft {
+  /** Set for an existing objective when re-planning a deployed operation. */
+  id?: number;
   title: string;
   doneWhen: string;
   effort: Effort;
   estMinutes: number;
+}
+
+export interface QuestPlan {
+  quest: Quest;
+  importance: number | null;
+  /** All objectives in order, finished ones included. */
+  steps: Step[];
 }
 
 export interface Breakdown {
@@ -253,6 +262,9 @@ export const api = {
   deployQuest: (questId: number, title: string, steps: StepDraft[]) =>
     invoke<Quest>("deploy_quest", { questId, title, steps }),
   getSteps: (questId: number) => invoke<Step[]>("get_steps", { questId }),
+  getQuestPlan: (questId: number) => invoke<QuestPlan>("get_quest_plan", { questId }),
+  updateQuestPlan: (questId: number, title: string, importance: number | null, steps: StepDraft[]) =>
+    invoke<Quest>("update_quest_plan", { questId, title, importance, steps }),
 
   listMatrix: () => invoke<MatrixQuest[]>("list_matrix"),
   scoreQuest: (questId: number) => invoke<MatrixQuest>("score_quest", { questId }),

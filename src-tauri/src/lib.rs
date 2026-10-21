@@ -98,6 +98,8 @@ pub fn run() {
             quests::delete_quest,
             quests::get_steps,
             quests::deploy_quest,
+            quests::get_quest_plan,
+            quests::update_quest_plan,
             priority::list_matrix,
             priority::set_quadrant,
             priority::clear_quadrant_override,
