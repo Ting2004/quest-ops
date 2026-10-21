@@ -1,6 +1,6 @@
 [package]
 name = "quest-ops"
-version = "0.1.2"
+version = "0.1.3"
 description = "Quest Ops: task breakdown and motivation"
 authors = ["tch4"]
 edition = "2024"

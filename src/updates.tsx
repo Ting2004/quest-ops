@@ -1,4 +1,5 @@
-// In-app updates through the Tauri updater: a quiet check shortly after
+// In-app updates through the Tauri updater (Gitee first for users in China,
+// then GitHub; see plugins.updater.endpoints): a quiet check shortly after
 // launch, a manual check from Config, and one-click download and install.
 // Installing always needs the person's click.
 import { getVersion } from "@tauri-apps/api/app";
@@ -11,6 +12,8 @@ import { useApp } from "./store";
 
 /** Delay before the startup check, so it never slows down opening the app. */
 const STARTUP_CHECK_MS = 4000;
+/** Per-check timeout, so an unreachable mirror falls through to the next one quickly. */
+const CHECK_TIMEOUT_MS = 20000;
 
 export type UpdateStatus =
   | { kind: "idle" }
@@ -53,7 +56,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     async (quiet: boolean) => {
       if (!quiet) setStatus({ kind: "checking" });
       try {
-        const found = await check();
+        const found = await check({ timeout: CHECK_TIMEOUT_MS });
         setUpdate(found);
         setStatus({ kind: found ? "available" : "current" });
         if (found && announced.current !== found.version) {
