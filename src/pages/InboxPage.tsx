@@ -11,6 +11,8 @@ type ReviewItem = { quest: Quest; breakdown: Breakdown };
 
 /** Drag payload type for moving a deployed operation back to the inbox. */
 const DRAG_TYPE = "application/x-questops-quest";
+/** Drag payload type for deploying an inbox operation. */
+const INBOX_DRAG_TYPE = "application/x-questops-inbox";
 
 export default function InboxPage() {
   const t = useT();
@@ -29,6 +31,7 @@ export default function InboxPage() {
   const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState<QuestPlan | null>(null);
   const [dropActive, setDropActive] = useState(false);
+  const [deployDropActive, setDeployDropActive] = useState(false);
 
   const busy = planningId !== null || batch !== null;
 
@@ -83,7 +86,8 @@ export default function InboxPage() {
     let done = 0;
     await runLimited(targets, AI_CONCURRENCY, async (quest, i) => {
       try {
-        results[i] = { quest, breakdown: await api.breakdownQuest(quest.id) };
+        // Operations that already have objectives reuse them; only new ones call the AI.
+        results[i] = quest.stepCount > 0 ? await savedItem(quest) : { quest, breakdown: await api.breakdownQuest(quest.id) };
       } catch (e) {
         failures.push(`${quest.title}: ${errorMessage(e)}`);
       }
@@ -197,14 +201,38 @@ export default function InboxPage() {
     setError("");
     setNotice("");
     try {
-      const plan = await api.getQuestPlan(quest.id);
-      const steps = plan.steps
-        .filter((s) => s.status !== "done")
-        .map(({ title, doneWhen, effort, estMinutes }) => ({ title, doneWhen, effort, estMinutes }));
-      startQueue([{ quest: plan.quest, breakdown: { questTitle: plan.quest.title, clarifyingQuestions: [], steps } }]);
+      startQueue([await savedItem(quest)]);
     } catch (e) {
       setError(errorMessage(e));
     }
+  }
+
+  /** A review item built from the operation's saved objectives (no AI call). */
+  async function savedItem(quest: Quest): Promise<ReviewItem> {
+    const plan = await api.getQuestPlan(quest.id);
+    const steps = plan.steps
+      .filter((s) => s.status !== "done")
+      .map(({ title, doneWhen, effort, estMinutes }) => ({ title, doneWhen, effort, estMinutes }));
+    return { quest: plan.quest, breakdown: { questTitle: plan.quest.title, clarifyingQuestions: [], steps } };
+  }
+
+  /** Puts an inbox operation back into play with its saved objectives. */
+  async function redeploy(quest: Quest) {
+    setError("");
+    setNotice("");
+    try {
+      const q = await api.redeployQuest(quest.id);
+      setNotice(t("in.redeployed", { title: q.title }));
+      await refresh();
+      await refreshApp();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
+  /** Explicitly asks the AI for a fresh plan, replacing the saved one on deploy. */
+  function replanWithAI(quest: Quest) {
+    if (confirm(t("in.replanConfirm", { title: quest.title }))) plan(quest);
   }
 
   if (editing) {
@@ -386,7 +414,15 @@ export default function InboxPage() {
           )}
           <ul className="quest-list">
             {inbox.map((q) => (
-              <li key={q.id} className={`quest-row ${selected.has(q.id) ? "selected" : ""}`}>
+              <li
+                key={q.id}
+                className={`quest-row ${selected.has(q.id) ? "selected" : ""}`}
+                draggable={!busy}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData(INBOX_DRAG_TYPE, String(q.id));
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+              >
                 <label className="check" aria-label={t("in.select", { title: q.title })}>
                   <input
                     type="checkbox"
@@ -400,23 +436,53 @@ export default function InboxPage() {
                   <span className="label mono">
                     {q.categoryName ?? t("common.uncategorized")}
                     {q.deadline && ` · ${t("common.due", { date: q.deadline })}`}
+                    {q.stepCount > 0 && ` · ${t("in.savedObjectives", { n: q.stepCount })}`}
                   </span>
                 </div>
-                {q.stepCount > 0 && (
-                  <button className="btn btn-ghost" disabled={busy} onClick={() => editSavedPlan(q)} title={t("in.editPlanHint")}>
-                    {t("in.editPlan")}
+                {q.stepCount > 0 ? (
+                  <div className="row quest-row-actions">
+                    <button className="btn btn-primary" disabled={busy} onClick={() => redeploy(q)} title={t("in.redeployHint")}>
+                      {t("in.redeploy")}
+                    </button>
+                    <button className="btn" disabled={busy} onClick={() => editSavedPlan(q)} title={t("in.editPlanHint")}>
+                      {t("in.editPlan")}
+                    </button>
+                    <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => replanWithAI(q)}>
+                      {planningId === q.id ? t("in.planning") : t("in.replanAI")}
+                    </button>
+                  </div>
+                ) : (
+                  <button className="btn" disabled={busy} onClick={() => plan(q)}>
+                    {planningId === q.id ? t("in.planning") : t("in.breakDown")}
                   </button>
                 )}
-                <button className="btn" disabled={busy} onClick={() => plan(q)}>
-                  {planningId === q.id ? t("in.planning") : t("in.breakDown")}
-                </button>
                 <button className="icon-btn danger" onClick={() => remove(q)} aria-label={t("common.delete")}>✕</button>
               </li>
             ))}
           </ul>
         </section>
 
-        <section className="panel">
+        <section
+          className={`panel ${deployDropActive ? "drop-target-inbox" : ""}`}
+          onDragOver={(e) => {
+            if (!e.dataTransfer.types.includes(INBOX_DRAG_TYPE)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            if (!deployDropActive) setDeployDropActive(true);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) setDeployDropActive(false);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDeployDropActive(false);
+            const q = inbox.find((x) => x.id === Number(e.dataTransfer.getData(INBOX_DRAG_TYPE)));
+            if (!q) return;
+            // Saved objectives redeploy straight away; a never-planned task goes to the AI.
+            if (q.stepCount > 0) redeploy(q);
+            else plan(q);
+          }}
+        >
           <div className="panel-head">
             <h2 className="h-display" style={{ fontSize: 22 }}>{t("in.deployed")}</h2>
             <span className="label mono">{t("in.active", { n: active.length })}</span>

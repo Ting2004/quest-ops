@@ -275,6 +275,7 @@ export const api = {
   updateQuestPlan: (questId: number, details: PlanDetails, steps: StepDraft[]) =>
     invoke<Quest>("update_quest_plan", { questId, details, steps }),
   moveToInbox: (questId: number) => invoke<Quest>("move_to_inbox", { questId }),
+  redeployQuest: (questId: number) => invoke<Quest>("redeploy_quest", { questId }),
 
   listMatrix: () => invoke<MatrixQuest[]>("list_matrix"),
   scoreQuest: (questId: number) => invoke<MatrixQuest>("score_quest", { questId }),

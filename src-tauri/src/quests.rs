@@ -174,7 +174,7 @@ pub fn steps_for(conn: &Connection, quest_id: i64) -> AppResult<Vec<Step>> {
 }
 
 /// Replaces a quest's pending steps with the reviewed list, marks it active,
-/// and queues it for priority scoring.
+/// and queues it for priority scoring if it has never been scored.
 #[tauri::command]
 pub fn deploy_quest(
     app: tauri::AppHandle,
@@ -224,8 +224,13 @@ pub fn deploy_quest(
     )?;
     tx.commit()?;
     let quest = load_quest(&conn, quest_id)?;
+    // Score only operations never scored, so redeploying a saved plan makes no AI call.
+    let needs_score: bool =
+        conn.query_row("SELECT importance IS NULL FROM quest WHERE id = ?1", [quest_id], |r| r.get(0))?;
     drop(conn);
-    crate::priority::schedule(&app, [quest_id]);
+    if needs_score {
+        crate::priority::schedule(&app, [quest_id]);
+    }
     Ok(quest)
 }
 
@@ -532,5 +537,76 @@ mod inbox_tests {
         assert_eq!(q("SELECT COUNT(*) FROM timer_session WHERE ended_at IS NULL"), 0, "run stopped");
         assert_eq!(q("SELECT COUNT(*) FROM daily_plan"), 0);
         assert!(move_to_inbox_in(&mut conn, 1).is_err(), "already in the inbox");
+    }
+}
+
+/// Puts an inbox operation that still has its objectives straight back into
+/// play, with no new AI breakdown. Objectives (and their ids and history) are
+/// reused as they are; it is queued for scoring only if it was never scored.
+pub fn redeploy_in(conn: &Connection, quest_id: i64) -> AppResult<bool> {
+    let (status, open, scored): (String, i64, bool) = conn
+        .query_row(
+            "SELECT status,
+                    (SELECT COUNT(*) FROM step WHERE quest_id = q.id AND parent_step_id IS NULL
+                       AND status IN ('pending', 'active')),
+                    importance IS NOT NULL
+             FROM quest q WHERE id = ?1",
+            [quest_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?
+        .ok_or_else(|| AppError::Msg(format!("operation {quest_id} not found")))?;
+    if status != "inbox" {
+        return Err(AppError::Msg("only inbox operations can be redeployed".into()));
+    }
+    if open == 0 {
+        return Err(AppError::Msg("this operation has no saved objectives; break it down first".into()));
+    }
+    conn.execute("UPDATE quest SET status = 'active' WHERE id = ?1", [quest_id])?;
+    Ok(!scored)
+}
+
+#[tauri::command]
+pub fn redeploy_quest(app: tauri::AppHandle, db: State<'_, Db>, quest_id: i64) -> AppResult<Quest> {
+    let conn = lock(&db)?;
+    let needs_score = redeploy_in(&conn, quest_id)?;
+    let quest = load_quest(&conn, quest_id)?;
+    drop(conn);
+    if needs_score {
+        crate::priority::schedule(&app, [quest_id]);
+    }
+    Ok(quest)
+}
+
+#[cfg(test)]
+mod redeploy_tests {
+    use super::*;
+
+    #[test]
+    fn redeploy_reuses_saved_objectives_without_replanning() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate_for_test(&mut conn);
+        conn.execute_batch(
+            "INSERT INTO quest (id, title, status, importance) VALUES (1, 'Op', 'active', 4),
+                                                                     (2, 'Empty', 'inbox', NULL);
+             INSERT INTO step (id, quest_id, title, est_minutes, order_index, status) VALUES
+                 (10, 1, 'Done', 10, 0, 'done'), (11, 1, 'Next', 10, 1, 'pending');",
+        )
+        .unwrap();
+        move_to_inbox_in(&mut conn, 1).unwrap();
+        assert_eq!(redeploy_in(&conn, 1).unwrap(), false, "already scored, no re-score");
+        let ids: Vec<i64> = conn
+            .prepare("SELECT id FROM step WHERE quest_id = 1 ORDER BY order_index")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(ids, [10, 11], "same objectives, same ids");
+        let status: String =
+            conn.query_row("SELECT status FROM quest WHERE id = 1", [], |r| r.get(0)).unwrap();
+        assert_eq!(status, "active");
+        assert!(redeploy_in(&conn, 1).is_err(), "already deployed");
+        assert!(redeploy_in(&conn, 2).is_err(), "nothing saved to deploy");
     }
 }

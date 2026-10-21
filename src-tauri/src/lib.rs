@@ -103,6 +103,7 @@ pub fn run() {
             quests::get_quest_plan,
             quests::update_quest_plan,
             quests::move_to_inbox,
+            quests::redeploy_quest,
             priority::list_matrix,
             priority::set_quadrant,
             priority::clear_quadrant_override,
