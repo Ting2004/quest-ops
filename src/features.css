@@ -446,6 +446,5 @@ button.update-badge:hover { background: var(--accent); color: var(--accent-ink);
 /* Inbox rows with several actions: let the buttons wrap under the title. */
 .quest-row { flex-wrap: wrap; }
 .quest-row .quest-row-main { flex: 1 1 220px; }
-.btn-sm { padding: 5px 10px; font-size: 13px; }
 .quest-row-actions { gap: 6px; }
 .quest-list .quest-row[draggable="true"] { cursor: grab; }

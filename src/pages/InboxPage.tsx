@@ -447,7 +447,7 @@ export default function InboxPage() {
                     <button className="btn" disabled={busy} onClick={() => editSavedPlan(q)} title={t("in.editPlanHint")}>
                       {t("in.editPlan")}
                     </button>
-                    <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => replanWithAI(q)}>
+                    <button className="btn btn-ghost" disabled={busy} onClick={() => replanWithAI(q)}>
                       {planningId === q.id ? t("in.planning") : t("in.replanAI")}
                     </button>
                   </div>
