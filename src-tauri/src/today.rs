@@ -307,3 +307,27 @@ pub async fn debrief_today(db: State<'_, Db>) -> AppResult<Today> {
     )?;
     load_today(&conn)
 }
+
+#[cfg(test)]
+mod live {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn live_plan_and_debrief() {
+        let model = std::env::var("QUESTOPS_PROBE_MODEL").unwrap_or_else(|_| "gpt-5".into());
+        let s = crate::llm::live::probe_settings(&model);
+        let user = "Time available today: 90 minutes\n\nCandidates:\nOperation \"撰写第二章\" (Q2, due in 9 days):\n  stepId 11: 列出 10 篇核心文献 (15 min)\n  stepId 12: 起草 2.1 节 (20 min)\nOperation \"报销差旅\" (Q3, due in 1 days):\n  stepId 21: 填写报销单 (10 min)\n";
+        let schema = json!({ "type": "object", "additionalProperties": false, "required": ["picks"],
+            "properties": { "picks": { "type": "array", "items": { "type": "object", "additionalProperties": false,
+                "required": ["stepId", "note"], "properties": { "stepId": { "type": "integer" }, "note": { "type": "string" } } } } } });
+        let r: AppResult<PlanReply> = tauri::async_runtime::block_on(llm::chat_json(
+            &s, &model, &format!("{PLAN_SYSTEM}\n{}", llm::language_rule("zh")), user, "daily_plan", schema));
+        match r { Ok(x) => println!("OK plan {model}: {:?}", x.picks.iter().map(|p| p.step_id).collect::<Vec<_>>()), Err(e) => println!("FAILED plan {model}: {e}") }
+        let schema = json!({ "type": "object", "additionalProperties": false, "required": ["debrief"],
+            "properties": { "debrief": { "type": "string" } } });
+        let r: AppResult<DebriefReply> = tauri::async_runtime::block_on(llm::chat_json(
+            &s, &model, &format!("{DEBRIEF_SYSTEM}\n{}", llm::language_rule("zh")), "Completed today (1):\n- 列出 10 篇核心文献 (operation: 撰写第二章, 26 XP)\n", "debrief", schema));
+        match r { Ok(x) => println!("OK debrief {model}: {} chars", x.debrief.chars().count()), Err(e) => println!("FAILED debrief {model}: {e}") }
+    }
+}

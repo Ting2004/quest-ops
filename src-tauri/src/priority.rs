@@ -466,3 +466,22 @@ mod tests {
         assert_eq!(quadrant(2, 1, R3), 4);
     }
 }
+
+#[cfg(test)]
+mod live {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn live_score() {
+        let model = std::env::var("QUESTOPS_PROBE_MODEL").unwrap_or_else(|_| "gpt-5".into());
+        let s = llm::live::probe_settings(&model);
+        let system = format!("{SCORE_SYSTEM}\n{}", llm::language_rule("zh"));
+        let user = "Today: 2026-10-21\nTask: 撰写论文第二章文献综述\n\nThe person's goals:\n2027 年完成博士论文\n\nThe person treats importance 4 or higher as important.\n";
+        let r: AppResult<Score> = tauri::async_runtime::block_on(llm::chat_json(&s, &model, &system, user, "priority_score", score_schema()));
+        match r {
+            Ok(x) => println!("OK score {model}: importance {} urgency {} rationale {:?}", x.importance, x.urgency, x.rationale),
+            Err(e) => println!("FAILED score {model}: {e}"),
+        }
+    }
+}

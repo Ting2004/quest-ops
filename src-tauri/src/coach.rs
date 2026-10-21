@@ -260,3 +260,26 @@ pub fn insert_step(
         .find(|s| s.id == id)
         .ok_or_else(|| AppError::Msg("inserted objective not found".into()))
 }
+
+#[cfg(test)]
+mod live {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn live_split_and_unstick() {
+        let model = std::env::var("QUESTOPS_PROBE_MODEL").unwrap_or_else(|_| "gpt-5".into());
+        let s = llm::live::probe_settings(&model);
+        let user = "Operation: 撰写第二章\nObjective: 起草 2.1 节\nDone when: 2.1 节有 500 字草稿\nEstimate: 20 minutes\n";
+        let split_schema = json!({ "type": "object", "additionalProperties": false, "required": ["steps"],
+            "properties": { "steps": { "type": "array", "items": step_schema() } } });
+        let r: AppResult<SplitReply> = tauri::async_runtime::block_on(llm::chat_json(
+            &s, &model, &format!("{SPLIT_SYSTEM}\n{}", llm::language_rule("zh")), user, "split_objective", split_schema));
+        match r { Ok(x) => println!("OK split {model}: {} steps", x.steps.len()), Err(e) => println!("FAILED split {model}: {e}") }
+        let unstick_schema = json!({ "type": "object", "additionalProperties": false, "required": ["advice", "step"],
+            "properties": { "advice": { "type": "string" }, "step": step_schema() } });
+        let r: AppResult<UnstickReply> = tauri::async_runtime::block_on(llm::chat_json(
+            &s, &model, &format!("{UNSTICK_SYSTEM}\n{}", llm::language_rule("zh")), &format!("{user}What the person says is in the way: 不知道从哪开始\n"), "unstick", unstick_schema));
+        match r { Ok(x) => println!("OK unstick {model}: {:?}", x.step.title), Err(e) => println!("FAILED unstick {model}: {e}") }
+    }
+}

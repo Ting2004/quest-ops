@@ -59,15 +59,62 @@ fn client() -> AppResult<reqwest::Client> {
     Ok(reqwest::Client::builder().timeout(Duration::from_secs(180)).build()?)
 }
 
-/// Lists models via `GET /models` (supported by OpenAI and DeepSeek). This
-/// confirms the key works and the model name exists without spending tokens.
+/// Whether a listed model can do what the app needs: chat completions that
+/// return text. Speech, transcription, audio, realtime, embedding, image,
+/// video, moderation and search models are left out; for OpenAI so are Codex
+/// and "-pro" models, which are not served by Chat Completions.
+pub fn is_chat_model(provider: &str, id: &str) -> bool {
+    let id = id.to_ascii_lowercase();
+    const NOT_TEXT: &[&str] = &[
+        "tts", "whisper", "transcri", "audio", "realtime", "speech", "translate", "diarize",
+        "embed", "rerank", "moderation", "dall-e", "image", "sora", "video", "live-", "search",
+        "deep-research", "computer-use", "-instruct", "babbage", "davinci",
+    ];
+    if NOT_TEXT.iter().any(|w| id.contains(w)) {
+        return false;
+    }
+    if provider == "openai" && (id.contains("codex") || id.ends_with("-pro") || id.contains("-pro-")) {
+        return false;
+    }
+    true
+}
+
+#[derive(Deserialize)]
+struct Probe {
+    #[allow(dead_code)]
+    ok: bool,
+}
+
+/// One tiny request in the app's real reply format, so a model that is listed
+/// but cannot actually serve the app fails here rather than mid-task.
+async fn verify_model(s: &Settings, model: &str) -> AppResult<()> {
+    let schema = json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ok"],
+        "properties": { "ok": { "type": "boolean" } }
+    });
+    let _: Probe = chat_json(s, model, "This is a connection check.", "Reply with ok set to true.", "probe", schema).await?;
+    Ok(())
+}
+
+/// Checks the link: the key (via `GET /models`), that the chosen models are
+/// listed, and that each one answers a real request in the app's format.
 #[tauri::command]
 pub async fn test_llm_connection(db: State<'_, Db>) -> AppResult<ConnectionCheck> {
     let s = load_settings(&db)?;
     let key = require_key(&s)?;
+    let name = provider_name(&s.provider);
+    if s.provider != "openai" && s.api_base_url.contains("api.openai.com") {
+        return Ok(ConnectionCheck {
+            ok: false,
+            model: s.model_name.clone(),
+            message: "This is OpenAI's address. Choose the OpenAI provider so requests use OpenAI's format.".into(),
+            available: Vec::new(),
+        });
+    }
     let res = client()?.get(format!("{}/models", s.api_base_url)).bearer_auth(key).send().await?;
     let status = res.status();
-    let name = provider_name(&s.provider);
 
     let fail = |message: String| ConnectionCheck {
         ok: false,
@@ -88,24 +135,40 @@ pub async fn test_llm_connection(db: State<'_, Db>) -> AppResult<ConnectionCheck
         .as_array()
         .map(|a| a.iter().filter_map(|m| m["id"].as_str().map(String::from)).collect())
         .unwrap_or_default();
+    let listed = available.clone();
+    available.retain(|m| is_chat_model(&s.provider, m));
+    // Newest-looking names first (higher versions sort later alphabetically).
     available.sort();
+    available.reverse();
     available.truncate(MAX_LISTED_MODELS);
 
-    let wanted: Vec<&str> =
+    let mut wanted: Vec<&str> =
         [&s.model_name, &s.small_model_name].into_iter().map(String::as_str).filter(|m| !m.is_empty()).collect();
+    wanted.dedup();
     let missing: Vec<&str> =
-        wanted.iter().copied().filter(|m| !available.iter().any(|a| a == m)).collect();
+        wanted.iter().copied().filter(|m| !listed.iter().any(|a| a == m)).collect();
 
-    let (ok, message) = if s.model_name.is_empty() {
-        (false, format!("{name} key works. Pick a model below."))
-    } else if available.is_empty() {
-        (true, format!("{name} key works. The model list was empty, so the model name is unchecked."))
-    } else if missing.is_empty() {
-        (true, format!("Link established with {name}. Key and model verified."))
-    } else {
-        (false, format!("{name} key works, but \"{}\" is not available. Pick a model below.", missing.join("\", \"")))
-    };
-    Ok(ConnectionCheck { ok, model: s.model_name, message, available })
+    if s.model_name.is_empty() {
+        return Ok(ConnectionCheck { ok: false, model: s.model_name, message: format!("{name} key works. Pick a model below."), available });
+    }
+    if !listed.is_empty() && !missing.is_empty() {
+        let message = format!("{name} key works, but \"{}\" is not available. Pick a model below.", missing.join("\", \""));
+        return Ok(ConnectionCheck { ok: false, model: s.model_name, message, available });
+    }
+    if let Some(bad) = wanted.iter().find(|m| !is_chat_model(&s.provider, m)) {
+        let message = format!("\"{bad}\" is not a text model the app can use (speech, image or similar). Pick another.");
+        return Ok(ConnectionCheck { ok: false, model: s.model_name, message, available });
+    }
+
+    // A real request per model in the app's reply format.
+    for m in &wanted {
+        if let Err(e) = verify_model(&s, m).await {
+            let message = format!("\"{m}\" is listed but failed a test request: {e}");
+            return Ok(ConnectionCheck { ok: false, model: s.model_name, message, available });
+        }
+    }
+    let message = format!("Link established with {name}. {} verified with a test request.", wanted.join(" and "));
+    Ok(ConnectionCheck { ok: true, model: s.model_name, message, available })
 }
 
 /// One request. Returns the reply text, or an error that is not worth retrying.
@@ -181,7 +244,12 @@ pub(crate) async fn chat_json<T: DeserializeOwned>(
             });
         } else {
             body["response_format"] = json!({ "type": "json_object" });
-            body["max_tokens"] = json!(JSON_MODE_MAX_TOKENS);
+            // DeepSeek's docs ask for an explicit budget. Other OpenAI-compatible
+            // servers differ (newer OpenAI models reject max_tokens outright),
+            // so they get none.
+            if s.provider == "deepseek" {
+                body["max_tokens"] = json!(JSON_MODE_MAX_TOKENS);
+            }
         }
 
         match request(s, &key, &body).await? {
@@ -244,8 +312,11 @@ fold those into the objective they belong to.
 - estMinutes is a realistic estimate for this person, between 10 and 20.
 - If the task covers more work than 6 objectives can hold, cover the first \
 working session and make the last objective \"Plan the next session\".
-- If the task is too vague to plan sensibly, return 1 to 3 clarifyingQuestions \
-and an empty steps list. Otherwise return an empty clarifyingQuestions list.
+- Prefer making reasonable assumptions and planning a first working session; \
+early objectives can gather what is missing (e.g. \"List the sources you already \
+have\"). Only if not even a sensible first objective is possible, return 1 to 3 \
+clarifyingQuestions and an empty steps list. Otherwise return an empty \
+clarifyingQuestions list.
 - questTitle is a short, specific name for the whole task (max 60 characters).";
 
 fn breakdown_schema() -> Value {
@@ -369,5 +440,111 @@ mod tests {
         assert_eq!(snap_effort(3), 3);
         assert!(supports_json_schema("openai"));
         assert!(!supports_json_schema("deepseek"));
+    }
+}
+
+/// Live checks against the real API with the saved key. Never run by default:
+///   QUESTOPS_PROBE_MODEL=gpt-5 cargo test live_ -- --ignored --nocapture
+#[cfg(test)]
+pub(crate) mod live {
+    use super::*;
+
+    pub(crate) fn probe_settings(model: &str) -> Settings {
+        Settings {
+            commander_name: String::new(),
+            goals_text: String::new(),
+            model_name: model.into(),
+            small_model_name: String::new(),
+            api_base_url: std::env::var("QUESTOPS_PROBE_BASE").unwrap_or_else(|_| "https://api.openai.com/v1".into()),
+            max_pauses: 2,
+            urgent_within_days: 3,
+            importance_threshold: 4,
+            language: "en".into(),
+            theme: "dark".into(),
+            provider: std::env::var("QUESTOPS_PROBE_PROVIDER").unwrap_or_else(|_| "openai".into()),
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn live_list_models() {
+        let s = probe_settings("");
+        let key = require_key(&s).expect("no saved OpenAI key");
+        let ids: Vec<String> = tauri::async_runtime::block_on(async {
+            let v: Value = client().unwrap().get(format!("{}/models", s.api_base_url))
+                .bearer_auth(key).send().await.unwrap().json().await.unwrap();
+            v["data"].as_array().unwrap().iter().filter_map(|m| m["id"].as_str().map(String::from)).collect()
+        });
+        let mut ids = ids;
+        ids.sort();
+        println!("{} models: {}", ids.len(), ids.join(", "));
+    }
+
+    #[test]
+    #[ignore]
+    fn live_breakdown() {
+        let model = std::env::var("QUESTOPS_PROBE_MODEL").unwrap_or_else(|_| "gpt-5".into());
+        let s = probe_settings(&model);
+        let lang = std::env::var("QUESTOPS_PROBE_LANG").unwrap_or_else(|_| "en".into());
+        let system = format!("{BREAKDOWN_SYSTEM}\n{}", language_rule(&lang));
+        let user = "Today: 2026-10-21\nTask: Write the literature review for chapter 2 of my thesis\n";
+        let r: AppResult<Breakdown> = tauri::async_runtime::block_on(chat_json(
+            &s, &model, &system, user, "quest_breakdown", breakdown_schema(),
+        ));
+        match r {
+            Ok(b) => println!(
+                "OK {model}: {} objectives, first: {:?}, title: {:?}, questions: {:?}",
+                b.steps.len(),
+                b.steps.first().map(|x| &x.title),
+                b.quest_title,
+                b.clarifying_questions
+            ),
+            Err(e) => println!("FAILED {model}: {e}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod live_json_mode {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn live_openai_json_mode_max_tokens() {
+        let s = live::probe_settings("gpt-5");
+        let key = require_key(&s).unwrap();
+        for with_limit in [true, false] {
+            let mut body = json!({
+                "model": "gpt-5",
+                "messages": [{ "role": "user", "content": "Reply with a JSON object {\"ok\": true}." }],
+                "response_format": { "type": "json_object" },
+            });
+            if with_limit { body["max_tokens"] = json!(JSON_MODE_MAX_TOKENS); }
+            let r = tauri::async_runtime::block_on(request(&s, &key, &body));
+            println!("json mode, max_tokens={with_limit}: {:?}", r.map(|c| c.unwrap_or_default()).map_err(|e| e.to_string()));
+        }
+    }
+}
+
+#[cfg(test)]
+mod model_filter_tests {
+    use super::is_chat_model;
+
+    #[test]
+    fn only_text_chat_models_are_offered() {
+        for id in ["gpt-5", "gpt-5-mini", "gpt-6-luna", "gpt-5.6-luna", "gpt-4.1", "o3", "o4-mini", "chat-latest"] {
+            assert!(is_chat_model("openai", id), "{id} should be offered");
+        }
+        for id in [
+            "tts-1", "whisper-1", "gpt-4o-mini-tts", "gpt-4o-transcribe", "gpt-audio", "gpt-realtime-2",
+            "text-embedding-3-small", "gpt-image-2", "chatgpt-image-latest", "sora-2", "omni-moderation-latest",
+            "gpt-5-codex", "gpt-5-pro", "gpt-5.4-pro-2026-03-05", "o1-pro", "gpt-4o-search-preview",
+            "o4-mini-deep-research", "gpt-3.5-turbo-instruct", "davinci-002", "gpt-live-1", "gpt-realtime-translate",
+        ] {
+            assert!(!is_chat_model("openai", id), "{id} should be hidden");
+        }
+        // DeepSeek's "-pro" models are ordinary chat models.
+        assert!(is_chat_model("deepseek", "deepseek-v4-pro"));
+        assert!(is_chat_model("deepseek", "deepseek-flash"));
     }
 }
