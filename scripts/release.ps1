@@ -122,31 +122,64 @@ if ((Invoke-Native { git push gitee $tag } | Select-Object -Last 1) -ne 0) { thr
 
 $api = "https://gitee.com/api/v5/repos/$giteeRepo/releases"
 $releaseNotes = if ($Notes) { $Notes } else { "Quest Ops $version" }
-$release = Invoke-Gitee $api @(
-    '--form-string', "access_token=$giteeToken",
-    '--form-string', "tag_name=$tag",
-    '--form-string', "name=Quest Ops $version",
-    '--form-string', "body=$releaseNotes",
-    '--form-string', "target_commitish=main"
-)
+
+# Reuse the release and attachments if an earlier run already created them.
+$release = $null
+try { $release = Invoke-RestMethod "$api/tags/${tag}?access_token=$giteeToken" } catch { $release = $null }
+if (-not $release -or -not $release.id) {
+    $release = Invoke-Gitee $api @(
+        '--form-string', "access_token=$giteeToken",
+        '--form-string', "tag_name=$tag",
+        '--form-string', "name=Quest Ops $version",
+        '--form-string', "body=$releaseNotes",
+        '--form-string', "target_commitish=main"
+    )
+}
+$attached = @(Invoke-RestMethod "$api/$($release.id)/attach_files?access_token=$giteeToken")
 $setupUrl = $null
 foreach ($file in @("$share\$setupName", "$share\$portableName")) {
-    $att = Invoke-Gitee "$api/$($release.id)/attach_files" @('--form-string', "access_token=$giteeToken", '-F', "file=@$file")
-    if ((Split-Path $file -Leaf) -eq $setupName) { $setupUrl = $att.browser_download_url }
+    $name = Split-Path $file -Leaf
+    $existing = $attached | Where-Object { $_.name -eq $name } | Select-Object -First 1
+    $url = if ($existing) {
+        Write-Host "   $name already on Gitee"
+        $existing.browser_download_url
+    } else {
+        Write-Host "   uploading $name"
+        (Invoke-Gitee "$api/$($release.id)/attach_files" @('--form-string', "access_token=$giteeToken", '-F', "file=@$file")).browser_download_url
+    }
+    if ($name -eq $setupName) { $setupUrl = $url }
 }
 if (-not $setupUrl) { throw "Gitee did not return a download URL for the installer." }
 
 # The Gitee manifest lives alone on the "updates" branch, so its address
-# (raw/updates/latest.json) never changes. Built with git plumbing so the
-# working tree is untouched.
+# (raw/updates/latest.json) never changes. Built with git plumbing and a
+# temporary index (no stdin, which Windows PowerShell prefixes with a BOM),
+# so the working tree and real index are untouched.
 $giteeManifest = Join-Path $env:TEMP "latest-gitee.json"
+$tempIndex = Join-Path $env:TEMP "questops-updates.index"
 Write-Utf8NoBom $giteeManifest (New-Manifest $setupUrl $signature)
-$blob = git hash-object -w $giteeManifest
-$tree = "100644 blob $blob`tlatest.json" | git mktree
-$updateCommit = git commit-tree $tree -m "Update manifest for $tag"
+try {
+    $blob = (git hash-object -w --no-filters $giteeManifest).Trim()
+    if ($blob -notmatch '^[0-9a-f]{40}$') { throw "git hash-object failed: $blob" }
+    $env:GIT_INDEX_FILE = $tempIndex
+    Remove-Item $tempIndex -ErrorAction SilentlyContinue
+    git update-index --add --cacheinfo "100644,$blob,latest.json"
+    $tree = (git write-tree).Trim()
+} finally {
+    Remove-Item Env:GIT_INDEX_FILE -ErrorAction SilentlyContinue
+    Remove-Item $tempIndex -ErrorAction SilentlyContinue
+}
+if ($tree -notmatch '^[0-9a-f]{40}$') { throw "git write-tree failed: $tree" }
+$updateCommit = (git commit-tree $tree -m "Update manifest for $tag").Trim()
+if ($updateCommit -notmatch '^[0-9a-f]{40}$') { throw "git commit-tree failed: $updateCommit" }
 if ((Invoke-Native { git push gitee "${updateCommit}:refs/heads/updates" --force } | Select-Object -Last 1) -ne 0) { throw "Publishing the Gitee update manifest failed." }
 Copy-Item $giteeManifest "$share\latest-gitee.json" -Force
 Remove-Item $giteeManifest
+
+# Confirm what installed apps will actually read.
+$live = curl.exe -sL "https://gitee.com/$giteeRepo/raw/updates/latest.json" | ConvertFrom-Json
+if ($live.version -ne $version) { throw "Gitee manifest check failed: expected $version, got '$($live.version)'" }
+Write-Host "   Gitee manifest live: version $($live.version)"
 
 Write-Host "== Done" -ForegroundColor Green
 if (-not $GiteeOnly) { Write-Host "   GitHub: https://github.com/$repo/releases/tag/$tag" }
