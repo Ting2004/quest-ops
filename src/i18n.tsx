@@ -41,6 +41,7 @@ const en = {
   "effort.1": "1 · Trivial",
   "effort.2": "2 · Light",
   "effort.3": "3 · Focused",
+  "effort.4": "4 · Hard",
   "effort.5": "5 · Demanding",
 
   // quadrants
@@ -425,6 +426,7 @@ const zh: Dict = {
   "effort.1": "1 · 轻而易举",
   "effort.2": "2 · 轻松",
   "effort.3": "3 · 专注",
+  "effort.4": "4 · 吃力",
   "effort.5": "5 · 艰巨",
 
   "q1.title": "紧急作战",

@@ -55,7 +55,7 @@ export interface NewQuest {
   deadline: string | null;
 }
 
-export type Effort = 1 | 2 | 3 | 5;
+export type Effort = 1 | 2 | 3 | 4 | 5;
 
 export interface StepDraft {
   /** Set for an existing objective when re-planning a deployed operation. */

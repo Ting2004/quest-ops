@@ -143,7 +143,7 @@ pub fn validate_draft(s: &StepDraft, position: usize) -> AppResult<()> {
     if s.title.trim().is_empty() {
         return Err(AppError::Msg(format!("objective {position} has no title")));
     }
-    if ![1, 2, 3, 5].contains(&s.effort) {
+    if !(1..=5).contains(&s.effort) {
         return Err(AppError::Msg(format!("objective {position} has invalid effort")));
     }
     if !(1..=240).contains(&s.est_minutes) {

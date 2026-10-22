@@ -198,7 +198,7 @@ pub fn import_into(conn: &mut Connection, file: ExportFile) -> AppResult<(Transf
             if s.title.trim().is_empty() {
                 continue;
             }
-            let effort = if [1, 2, 3, 5].contains(&s.effort) { s.effort } else { 2 };
+            let effort = if (1..=5).contains(&s.effort) { s.effort } else { 2 };
             let step_status = if s.status == "done" { "done" } else { "pending" };
             tx.execute(
                 "INSERT INTO step (quest_id, title, done_when, effort, est_minutes, order_index,

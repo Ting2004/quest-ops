@@ -308,7 +308,7 @@ fold those into the objective they belong to.
 - Each title starts with a concrete verb (draft, outline, review, email, read).
 - Each objective has a doneWhen criterion that makes completion unambiguous.
 - Make the first objective the easiest entry point into the work.
-- effort is 1 (trivial), 2 (light), 3 (focused) or 5 (demanding).
+- effort is 1 (trivial), 2 (light), 3 (focused), 4 (hard) or 5 (demanding).
 - estMinutes is a realistic estimate for this person, between 10 and 20.
 - If the task covers more work than 6 objectives can hold, cover the first \
 working session and make the last objective \"Plan the next session\".
@@ -336,7 +336,7 @@ fn breakdown_schema() -> Value {
                     "properties": {
                         "title": { "type": "string" },
                         "doneWhen": { "type": "string" },
-                        "effort": { "type": "integer", "enum": [1, 2, 3, 5] },
+                        "effort": { "type": "integer", "enum": [1, 2, 3, 4, 5] },
                         "estMinutes": { "type": "integer" }
                     }
                 }
@@ -417,14 +417,9 @@ pub(crate) fn today() -> String {
         .unwrap_or_default()
 }
 
-/// Nearest valid effort (1, 2, 3 or 5); JSON-mode models may return others.
+/// Effort clamped to 1 to 5; JSON-mode models may return values outside it.
 pub(crate) fn snap_effort(effort: i64) -> i64 {
-    match effort {
-        ..=1 => 1,
-        2 => 2,
-        3 => 3,
-        _ => 5,
-    }
+    effort.clamp(1, 5)
 }
 
 #[cfg(test)]
@@ -436,7 +431,8 @@ mod tests {
         assert_eq!(unfence("```json\n{\"a\":1}\n```"), "{\"a\":1}");
         assert_eq!(unfence("  {\"a\":1} "), "{\"a\":1}");
         assert_eq!(snap_effort(0), 1);
-        assert_eq!(snap_effort(4), 5);
+        assert_eq!(snap_effort(4), 4);
+        assert_eq!(snap_effort(9), 5);
         assert_eq!(snap_effort(3), 3);
         assert!(supports_json_schema("openai"));
         assert!(!supports_json_schema("deepseek"));

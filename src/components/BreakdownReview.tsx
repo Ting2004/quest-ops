@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api, errorMessage, type Breakdown, type Category, type Effort, type Quest, type Step, type StepDraft } from "../api";
 import { useT, type TKey } from "../i18n";
 
-const EFFORTS: Effort[] = [1, 2, 3, 5];
+const EFFORTS: Effort[] = [1, 2, 3, 4, 5];
 const IMPORTANCE = [1, 2, 3, 4, 5];
 
 interface Props {

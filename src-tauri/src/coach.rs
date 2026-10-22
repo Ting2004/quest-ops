@@ -82,7 +82,7 @@ fn step_schema() -> Value {
         "properties": {
             "title": { "type": "string" },
             "doneWhen": { "type": "string" },
-            "effort": { "type": "integer", "enum": [1, 2, 3, 5] },
+            "effort": { "type": "integer", "enum": [1, 2, 3, 4, 5] },
             "estMinutes": { "type": "integer" }
         }
     })
@@ -110,7 +110,7 @@ You split one objective that turned out too big into smaller objectives.
 - Each takes 5 to 15 minutes and starts with a concrete verb.
 - Each has a doneWhen criterion that makes completion unambiguous.
 - If the person already worked on it, cover only the remaining work.
-- effort is 1 (trivial), 2 (light), 3 (focused) or 5 (demanding).";
+- effort is 1 (trivial), 2 (light), 3 (focused), 4 (hard) or 5 (demanding).";
 
 /// Replaces an objective with 2 to 4 smaller ones in the same position. A run
 /// in progress on it is ended without XP first.

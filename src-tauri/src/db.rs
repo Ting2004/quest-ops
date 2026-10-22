@@ -166,6 +166,34 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     ALTER TABLE profile ADD COLUMN provider TEXT NOT NULL DEFAULT 'openai'
         CHECK (provider IN ('openai', 'deepseek', 'custom'));
     "#,
+    // v8: effort may be any of 1 to 5 (was 1, 2, 3 or 5). SQLite cannot relax
+    // a CHECK in place, so the table is rebuilt; `migrate` turns foreign keys
+    // off meanwhile, so dependent rows are not cascade-deleted.
+    r#"
+    CREATE TABLE step_v8 (
+        id              INTEGER PRIMARY KEY,
+        quest_id        INTEGER NOT NULL REFERENCES quest(id) ON DELETE CASCADE,
+        parent_step_id  INTEGER REFERENCES step(id) ON DELETE CASCADE,
+        title           TEXT    NOT NULL,
+        done_when       TEXT    NOT NULL DEFAULT '',
+        effort          INTEGER NOT NULL DEFAULT 1 CHECK (effort BETWEEN 1 AND 5),
+        est_minutes     INTEGER NOT NULL DEFAULT 15,
+        order_index     INTEGER NOT NULL DEFAULT 0,
+        status          TEXT    NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending', 'active', 'done', 'aborted')),
+        actual_seconds  INTEGER,
+        pauses_used     INTEGER NOT NULL DEFAULT 0,
+        completed_at    TEXT
+    );
+    INSERT INTO step_v8 (id, quest_id, parent_step_id, title, done_when, effort, est_minutes,
+                         order_index, status, actual_seconds, pauses_used, completed_at)
+        SELECT id, quest_id, parent_step_id, title, done_when, effort, est_minutes,
+               order_index, status, actual_seconds, pauses_used, completed_at
+        FROM step;
+    DROP TABLE step;
+    ALTER TABLE step_v8 RENAME TO step;
+    CREATE INDEX idx_step_quest ON step(quest_id, order_index);
+    "#,
 ];
 
 pub fn open(path: &Path) -> AppResult<Connection> {
@@ -178,13 +206,26 @@ pub fn open(path: &Path) -> AppResult<Connection> {
 
 fn migrate(conn: &mut Connection) -> AppResult<()> {
     let current: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    for (i, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
-        let tx = conn.transaction()?;
-        tx.execute_batch(sql)?;
-        tx.pragma_update(None, "user_version", i as i64 + 1)?;
-        tx.commit()?;
+    if current as usize >= MIGRATIONS.len() {
+        return Ok(());
     }
-    Ok(())
+    // Table rebuilds (see v8) must not trigger ON DELETE CASCADE. The pragma
+    // only takes effect outside a transaction, so it wraps the whole run.
+    let fk_on: bool = conn.pragma_query_value(None, "foreign_keys", |r| r.get(0))?;
+    conn.pragma_update(None, "foreign_keys", "OFF")?;
+    let result = (|| -> AppResult<()> {
+        for (i, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
+            let tx = conn.transaction()?;
+            tx.execute_batch(sql)?;
+            tx.pragma_update(None, "user_version", i as i64 + 1)?;
+            tx.commit()?;
+        }
+        Ok(())
+    })();
+    if fk_on {
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+    }
+    result
 }
 
 #[cfg(test)]
@@ -206,4 +247,48 @@ mod tests {
 #[cfg(test)]
 pub fn migrate_for_test(conn: &mut Connection) {
     migrate(conn).unwrap();
+}
+
+#[cfg(test)]
+mod effort_rebuild_tests {
+    use super::*;
+
+    #[test]
+    fn v8_rebuild_keeps_steps_and_everything_linked_to_them() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        // Bring the database to v7, as an existing install would be.
+        for (i, sql) in MIGRATIONS.iter().enumerate().take(7) {
+            conn.execute_batch(sql).unwrap();
+            conn.pragma_update(None, "user_version", i as i64 + 1).unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO quest (id, title, status) VALUES (1, 'Op', 'active');
+             INSERT INTO step (id, quest_id, title, effort, est_minutes, order_index, status)
+                 VALUES (1, 1, 'A', 5, 20, 0, 'done'), (2, 1, 'B', 2, 10, 1, 'pending');
+             INSERT INTO timer_session (step_id, started_at, started_ms, planned_seconds, ended_at, outcome)
+                 VALUES (1, datetime('now'), 0, 1200, datetime('now'), 'on_time');
+             INSERT INTO daily_plan (plan_date, step_id, order_index) VALUES ('2026-10-21', 2, 0);
+             INSERT INTO xp_event (quest_id, step_id, amount, reason) VALUES (1, 1, 50, 'objective');",
+        )
+        .unwrap();
+        assert!(conn.execute("UPDATE step SET effort = 4 WHERE id = 2", []).is_err(), "v7 rejects 4");
+
+        migrate(&mut conn).unwrap();
+
+        let n = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        assert_eq!(n("SELECT COUNT(*) FROM step"), 2);
+        assert_eq!(n("SELECT COUNT(*) FROM timer_session WHERE step_id = 1"), 1, "timer history kept");
+        assert_eq!(n("SELECT COUNT(*) FROM daily_plan WHERE step_id = 2"), 1, "day plan kept");
+        assert_eq!(n("SELECT step_id FROM xp_event"), 1, "XP log still linked");
+        conn.execute("UPDATE step SET effort = 4 WHERE id = 2", []).unwrap();
+        assert!(conn.execute("UPDATE step SET effort = 6 WHERE id = 2", []).is_err());
+        let fk: i64 = conn.pragma_query_value(None, "foreign_keys", |r| r.get(0)).unwrap();
+        assert_eq!(fk, 1, "foreign keys back on");
+        assert_eq!(n("SELECT COUNT(*) FROM pragma_foreign_key_check"), 0);
+        // Deleting a quest still cascades to its steps and their sessions.
+        conn.execute("DELETE FROM quest WHERE id = 1", []).unwrap();
+        assert_eq!(n("SELECT COUNT(*) FROM step"), 0);
+        assert_eq!(n("SELECT COUNT(*) FROM timer_session"), 0);
+    }
 }
