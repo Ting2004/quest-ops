@@ -462,4 +462,4 @@ button.update-badge:hover { background: var(--accent); color: var(--accent-ink);
     var(--panel);
 }
 .test-build-badge .h-display { color: var(--danger); font-size: 17px; letter-spacing: 0.1em; }
-.test-build-badge .label { color: var(--text-muted); }
+.test-build-badge .label { color: var(--text-muted); text-transform: none; }
