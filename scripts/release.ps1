@@ -81,6 +81,9 @@ if (-not $GiteeOnly) {
     Write-Host "== Building Quest Ops $version" -ForegroundColor Yellow
     $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content $keyPath -Raw
     $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
+    # Only builds made here are official; any other build shows a test-build badge.
+    $env:VITE_OFFICIAL_RELEASE = "1"
+    $env:VITE_BUILD_COMMIT = (git rev-parse --short HEAD).Trim()
     if ((Invoke-Native { npm run tauri build } | Select-Object -Last 1) -ne 0) { throw "Build failed." }
 }
 

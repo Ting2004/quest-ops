@@ -9,7 +9,8 @@ import SettingsPage from "./pages/SettingsPage";
 import StatsPage from "./pages/StatsPage";
 import TodayPage from "./pages/TodayPage";
 import { AppProvider, useApp } from "./store";
-import { UpdateBadge, UpdateProvider } from "./updates";
+import { UpdateBadge, UpdateProvider, useUpdates } from "./updates";
+import { buildCommit, isOfficialRelease } from "./build";
 
 type PageId = "today" | "matrix" | "inbox" | "stats" | "settings";
 
@@ -53,6 +54,7 @@ export default function App() {
 function Shell() {
   const t = useT();
   const { settings, setSettings, stats } = useApp();
+  const { currentVersion } = useUpdates();
   const [page, setPage] = useState<PageId>("today");
 
   // Send first-time users to configuration until a model is set.
@@ -87,6 +89,15 @@ function Shell() {
         </nav>
 
         <div className="sidebar-foot">
+          {!isOfficialRelease && (
+            <div className="test-build-badge" title={t("side.testBuildHint")}>
+              <span className="h-display">{t("side.testBuild")}</span>
+              <span className="label mono">
+                v{currentVersion}
+                {buildCommit && ` · ${buildCommit}`}
+              </span>
+            </div>
+          )}
           <UpdateBadge />
           <span className="label">{t("side.commander")}</span>
           <span className="h-display" style={{ fontSize: 20 }}>{settings?.commanderName ?? "—"}</span>

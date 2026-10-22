@@ -448,3 +448,18 @@ button.update-badge:hover { background: var(--accent); color: var(--accent-ink);
 .quest-row .quest-row-main { flex: 1 1 220px; }
 .quest-row-actions { gap: 6px; }
 .quest-list .quest-row[draggable="true"] { cursor: grab; }
+
+/* ---------------------------------------------------------- test build */
+.test-build-badge {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+  padding: 8px 10px 7px;
+  border: 1px solid var(--danger);
+  background:
+    repeating-linear-gradient(-45deg, rgba(255, 75, 62, 0.16) 0 8px, transparent 8px 16px),
+    var(--panel);
+}
+.test-build-badge .h-display { color: var(--danger); font-size: 17px; letter-spacing: 0.1em; }
+.test-build-badge .label { color: var(--text-muted); }

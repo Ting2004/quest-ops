@@ -21,6 +21,8 @@ const en = {
   "side.level": "Clearance LV.{level}",
   "side.xp": "{xp} / {need} XP",
   "side.streak": "Streak {n}d",
+  "side.testBuild": "Test build",
+  "side.testBuildHint": "Not an official release. Built locally for testing; official releases come from GitHub or Gitee.",
 
   // common
   "common.loading": "Loading…",
@@ -407,6 +409,8 @@ const zh: Dict = {
   "side.level": "权限等级 LV.{level}",
   "side.xp": "{xp} / {need} XP",
   "side.streak": "连续 {n} 天",
+  "side.testBuild": "测试版",
+  "side.testBuildHint": "非正式发布，仅为本地测试构建。正式版本请从 GitHub 或 Gitee 获取。",
 
   "common.loading": "加载中…",
   "common.min": "分钟",
