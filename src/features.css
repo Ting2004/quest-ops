@@ -463,3 +463,31 @@ button.update-badge:hover { background: var(--accent); color: var(--accent-ink);
 }
 .test-build-badge .h-display { color: var(--danger); font-size: 17px; letter-spacing: 0.1em; }
 .test-build-badge .label { color: var(--text-muted); text-transform: none; }
+
+/* ---------------------------------------------------------- data storage */
+.storage-current { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; }
+.storage-path {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-all;
+}
+.storage-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  background: var(--panel);
+}
+.storage-alert {
+  margin: 0 0 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--danger);
+  border-left-width: 3px;
+  color: var(--text);
+  font-weight: 700;
+}
+.storage-choice + .storage-alert { margin-top: 14px; }

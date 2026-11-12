@@ -157,6 +157,29 @@ const en = {
   "dz.resetDeleted": "Deleted {ops} operations, {obj} objectives and {runs} timer runs.",
   "dz.nothing": "There was no finished work to clear.",
 
+  // data storage location
+  "st.title": "Storage location",
+  "st.hint":
+    "Where your operations, objectives and progress are saved. Pick a folder inside OneDrive, Dropbox, iCloud Drive or Syncthing to sync across devices. Use the app on one device at a time, and let the sync finish before opening it on another. Your API key stays on each device.",
+  "st.default": "Local (default)",
+  "st.custom": "Custom folder",
+  "st.change": "Choose folder…",
+  "st.useDefault": "Back to local folder",
+  "st.retry": "Retry",
+  "st.unreachable":
+    "Your storage folder {dir} could not be reached, so the app is using local data. Changes made now are not synced. Connect the folder and press Retry.",
+  "st.unreachableToast": "Storage folder unreachable. Using local data; see Settings → Storage location.",
+  "st.alreadyUsed": "That folder is already in use.",
+  "st.empty": "Move your data to this folder? The app restarts afterwards.",
+  "st.hasData": "This folder already has Quest Ops data, for example from another device.",
+  "st.move": "Move data here",
+  "st.useExisting": "Use the data in this folder",
+  "st.replace": "Replace it with this device's data",
+  "st.cancel": "Cancel",
+  "st.moveNote": "A copy stays in the current folder as a backup.",
+  "st.replaceNote":
+    "Either way the app restarts. If you replace, the folder's data is renamed to questops-replaced-….db, not deleted.",
+
   // intake
   "in.newTask": "New task",
   "in.ctrlEnter": "Ctrl+Enter to plan",
@@ -535,6 +558,28 @@ const zh: Dict = {
   "dz.resetDetail": "XP {xp} → 0，已移除 {ach} 项成就。",
   "dz.resetDeleted": "已删除 {ops} 项作战、{obj} 个目标和 {runs} 次计时记录。",
   "dz.nothing": "没有可清除的已完成记录。",
+
+  // data storage location
+  "st.title": "存储位置",
+  "st.hint":
+    "作战、目标和进度的保存位置。选择 OneDrive、Dropbox、iCloud 云盘或 Syncthing 中的文件夹，即可在多台设备间同步。请一次只在一台设备上使用本应用，并等同步完成后再在另一台设备上打开。API 密钥保存在各自设备上，不会同步。",
+  "st.default": "本地（默认）",
+  "st.custom": "自定义文件夹",
+  "st.change": "选择文件夹…",
+  "st.useDefault": "改回本地文件夹",
+  "st.retry": "重试",
+  "st.unreachable":
+    "无法访问存储文件夹 {dir}，应用正在使用本地数据，此时的更改不会同步。请连接该文件夹后点击“重试”。",
+  "st.unreachableToast": "无法访问存储文件夹，正在使用本地数据。详见 设置 → 存储位置。",
+  "st.alreadyUsed": "该文件夹已在使用中。",
+  "st.empty": "将数据移到此文件夹？完成后应用会重启。",
+  "st.hasData": "此文件夹中已有 Quest Ops 数据（例如来自另一台设备）。",
+  "st.move": "将数据移到此处",
+  "st.useExisting": "使用此文件夹中的数据",
+  "st.replace": "用本机数据覆盖",
+  "st.cancel": "取消",
+  "st.moveNote": "当前文件夹中会保留一份副本作为备份。",
+  "st.replaceNote": "两种方式都会重启应用。选择覆盖时，文件夹中原有的数据会重命名为 questops-replaced-….db，不会被删除。",
 
   "in.newTask": "新任务",
   "in.ctrlEnter": "Ctrl+Enter 开始拆解",

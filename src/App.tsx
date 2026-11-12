@@ -53,7 +53,7 @@ export default function App() {
 
 function Shell() {
   const t = useT();
-  const { settings, setSettings, stats } = useApp();
+  const { settings, setSettings, stats, toast } = useApp();
   const { currentVersion } = useUpdates();
   const [page, setPage] = useState<PageId>("today");
 
@@ -61,6 +61,14 @@ function Shell() {
   useEffect(() => {
     if (settings && !settings.modelName) setPage("settings");
   }, [settings?.modelName]);
+
+  // Warn once at startup when the chosen storage folder is missing (local data in use).
+  useEffect(() => {
+    api
+      .getStorage()
+      .then((s) => s.unreachable && toast({ kind: "error", title: t("st.unreachableToast") }))
+      .catch(() => {});
+  }, []);
 
   const current = PAGES.find((p) => p.id === page)!;
   const levelPct = stats ? Math.round((stats.levelXp / stats.levelNeed) * 100) : 0;

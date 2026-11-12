@@ -196,10 +196,12 @@ pub(crate) const MIGRATIONS: &[&str] = &[
     "#,
 ];
 
-pub fn open(path: &Path) -> AppResult<Connection> {
+/// Opens and migrates the database. `wal` is off for synced folders, where the
+/// database must stay a single file (no -wal/-shm side files).
+pub fn open(path: &Path, wal: bool) -> AppResult<Connection> {
     let mut conn = Connection::open(path)?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
-    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "journal_mode", if wal { "WAL" } else { "DELETE" })?;
     migrate(&mut conn)?;
     Ok(conn)
 }

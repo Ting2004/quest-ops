@@ -8,6 +8,7 @@ mod quests;
 mod rewards;
 mod secrets;
 mod settings;
+mod storage;
 mod timer;
 mod today;
 mod updater;
@@ -72,7 +73,9 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
-            let conn = db::open(&dir.join("questops.db"))?;
+            let storage = storage::resolve(&dir);
+            let conn = storage::open_db(&storage)?;
+            app.manage(storage);
             let language = settings::load(&conn).map(|s| s.language).unwrap_or_default();
             app.manage(db::Db(Mutex::new(conn)));
             app.manage(priority::ScoreQueue::default());
@@ -132,6 +135,9 @@ pub fn run() {
             data::import_tasks,
             data::clear_finished,
             data::reset_progress,
+            storage::get_storage,
+            storage::inspect_storage_dir,
+            storage::set_storage_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2,6 +2,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { useState } from "react";
 import { api, errorMessage, type ClearSummary } from "../api";
 import { useT } from "../i18n";
+import StoragePanel from "./StoragePanel";
 import { useApp } from "../store";
 
 /** Accepted confirmation words for the full reset (compared case-insensitively). */
@@ -82,6 +83,7 @@ export default function DataPanel() {
 
   return (
     <>
+      <StoragePanel />
       <section className="panel">
         <div className="panel-head">
           <h2 className="h-display" style={{ fontSize: 24 }}>{t("data.title")}</h2>

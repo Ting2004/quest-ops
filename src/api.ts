@@ -235,6 +235,20 @@ export interface Stats {
 }
 
 /** What a danger-zone action removed. */
+export interface StorageInfo {
+  /** Folder that holds the database now. */
+  dir: string;
+  defaultDir: string;
+  custom: boolean;
+  /** A chosen folder that could not be reached at startup. */
+  unreachable: string | null;
+}
+
+export interface DirCheck {
+  isCurrent: boolean;
+  hasData: boolean;
+}
+
 export interface ClearSummary {
   operations: number;
   objectives: number;
@@ -312,6 +326,11 @@ export const api = {
   importTasks: (path: string) => invoke<TransferResult>("import_tasks", { path }),
   clearFinished: () => invoke<ClearSummary>("clear_finished"),
   resetProgress: () => invoke<ClearSummary>("reset_progress"),
+  getStorage: () => invoke<StorageInfo>("get_storage"),
+  inspectStorageDir: (dir: string) => invoke<DirCheck>("inspect_storage_dir", { dir }),
+  /** Switches the data folder and restarts the app. */
+  setStorageDir: (dir: string, mode: "move" | "useExisting") =>
+    invoke<void>("set_storage_dir", { dir, mode }),
 };
 
 export const events = {
